@@ -44,6 +44,7 @@ Copy `.env.example` for local reference. The application reads these environment
 | `APP_PORT` | `8000` | Uvicorn port |
 | `LOG_LEVEL` | `INFO` | Stdout logging level |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins |
+| `HOST_PORT` | `8000` | Host port used by `deploy/compose.yml` |
 
 For LAN production, set `CORS_ORIGINS` to the OSIRIS URL, for example `http://osiris.lan:3000`, rather than `*`.
 
@@ -63,7 +64,8 @@ The published image is `ghcr.io/osviel91/geo-osiris-api:latest`. The container r
 1. In Portainer, create a Stack from the Git repository `https://github.com/osviel91/geo-osiris-api`.
 2. Set the compose path to `deploy/compose.yml` and deploy it.
 3. Set `CORS_ORIGINS` in the stack environment to the actual OSIRIS origin before deployment.
-4. If GitOps updates are available, enable image re-pull/forced redeploy. Otherwise, redeploy the stack manually after an image publication.
+4. Optionally set `HOST_PORT` in the Portainer environment, for example `8080`; the API will then be available at `http://<ZIMA-IP>:8080`.
+5. If GitOps updates are available, enable image re-pull/forced redeploy. Otherwise, redeploy the stack manually after an image publication.
 
 The service is then available at `http://<ZIMA-IP>:8000/health` and `http://<ZIMA-IP>:8000/layers/test`. Public GHCR packages need no registry credential; for a private package, configure a Portainer GHCR registry credential with package-read-only access.
 

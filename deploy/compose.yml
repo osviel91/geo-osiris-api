@@ -4,7 +4,7 @@ services:
     container_name: osiris-geo-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-8000}:8000"
     environment:
       APP_ENV: production
       APP_HOST: 0.0.0.0
