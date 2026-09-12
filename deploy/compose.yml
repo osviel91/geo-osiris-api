@@ -1,0 +1,13 @@
+services:
+  geo-api:
+    image: ghcr.io/osviel91/osiris-geo-api:latest
+    container_name: osiris-geo-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: "*"
