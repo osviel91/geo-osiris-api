@@ -1,6 +1,6 @@
 services:
   geo-api:
-    image: ghcr.io/osviel91/osiris-geo-api:latest
+    image: ghcr.io/osviel91/geo-osiris-api:latest
     container_name: osiris-geo-api
     restart: unless-stopped
     ports:

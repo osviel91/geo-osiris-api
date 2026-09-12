@@ -56,11 +56,11 @@ curl http://localhost:8000/health
 curl http://localhost:8000/layers/test
 ```
 
-The published image is `ghcr.io/osviel91/osiris-geo-api:latest`. The container runs as a non-root user and has an HTTP health check.
+The published image is `ghcr.io/osviel91/geo-osiris-api:latest`. The container runs as a non-root user and has an HTTP health check.
 
 ## Portainer
 
-1. In Portainer, create a Stack from the Git repository `https://github.com/osviel91/osiris-geo-api`.
+1. In Portainer, create a Stack from the Git repository `https://github.com/osviel91/geo-osiris-api`.
 2. Set the compose path to `deploy/compose.yml` and deploy it.
 3. Set `CORS_ORIGINS` in the stack environment to the actual OSIRIS origin before deployment.
 4. If GitOps updates are available, enable image re-pull/forced redeploy. Otherwise, redeploy the stack manually after an image publication.
@@ -74,7 +74,7 @@ The publish workflow creates `latest` and immutable `sha-<shortsha>` tags on eve
 ```sh
 docker logs osiris-geo-api
 curl -i http://<ZIMA-IP>:8000/health
-docker pull ghcr.io/osviel91/osiris-geo-api:latest
+docker pull ghcr.io/osviel91/geo-osiris-api:latest
 ```
 
 If the pull fails, confirm the package visibility or Portainer registry credential. If the browser blocks layer requests, set `CORS_ORIGINS` to the exact OSIRIS origin and redeploy.
