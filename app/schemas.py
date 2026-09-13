@@ -227,6 +227,9 @@ class AdminImportRead(BaseModel):
     candidate_count: int
     resolved_candidate_count: int
     unresolved_candidate_count: int
+    csv_mapping: dict[str, Any]
+    csv_headers: list[str]
+    mapping_version: str
     source_name: str | None
     source_url: str | None
     created_at: datetime

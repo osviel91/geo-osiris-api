@@ -34,7 +34,7 @@ def admin_token(monkeypatch):
     monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
 
 
-def create_layer(slug: str) -> dict:
+def create_layer(slug: str, metadata: dict | None = None) -> dict:
     response = client.post(
         "/api/v1/admin/layers",
         headers=HEADERS,
@@ -44,6 +44,7 @@ def create_layer(slug: str) -> dict:
             "category": "TEST",
             "mode": "managed",
             "geometry_types": ["Point"],
+            "metadata_": metadata or {},
         },
     )
     assert response.status_code == 200, response.text
@@ -68,21 +69,21 @@ def test_csv_mapping_is_normalized_persisted_and_reproducible() -> None:
     layer = create_layer("mapping")
     staged = stage(
         layer["id"],
-        "lng,lat,id,network\n-3.7,40.4,EA4,BrandMeister\n",
+        "lng,lat,id,network,empty\n-3.7,40.4,EA4,BrandMeister,\n",
         {
             "longitude": "lng",
             "latitude": "lat",
             "external_id": "id",
-            "properties": {"network": "network"},
+            "properties": {"network": "network", "empty": "empty"},
         },
     )
 
-    assert staged["csv_headers"] == ["lng", "lat", "id", "network"]
+    assert staged["csv_headers"] == ["lng", "lat", "id", "network", "empty"]
     assert staged["csv_mapping"] == {
         "longitude": "lng",
         "latitude": "lat",
         "external_id": "id",
-        "properties": {"network": "network"},
+        "properties": {"network": "network", "empty": "empty"},
     }
     assert staged["mapping_version"] == "1"
     assert staged["valid_count"] == 1
@@ -91,8 +92,168 @@ def test_csv_mapping_is_normalized_persisted_and_reproducible() -> None:
         f"/api/v1/admin/imports/{staged['id']}/rows", headers=HEADERS
     ).json()["items"]
     assert rows[0]["external_id"] == "EA4"
-    assert rows[0]["properties"] == {"network": "BrandMeister"}
+    assert rows[0]["properties"] == {"network": "BrandMeister", "empty": ""}
     assert rows[0]["geometry"] == {"type": "Point", "coordinates": [-3.7, 40.4]}
+
+
+def test_typed_csv_mapping_converts_primitives_and_is_reproducible() -> None:
+    layer = create_layer("mapping-typed")
+    mapping = {
+        "longitude": "lng",
+        "latitude": "lat",
+        "external_id": "callsign",
+        "properties": {
+            "callsign": {"column": "callsign", "type": "string"},
+            "modes": {"column": "modes", "type": "json"},
+            "rx_frequency_mhz": {"column": "frequency", "type": "number"},
+            "dmr_color_code": {"column": "color_code", "type": "integer"},
+            "enabled": {"column": "enabled", "type": "boolean"},
+            "optional": {"column": "optional", "type": "number"},
+        },
+    }
+    staged = stage(
+        layer["id"],
+        "lng,lat,callsign,modes,frequency,color_code,enabled,optional\n"
+        '-3.7,40.4,EA4,"[""FM"", ""DMR""]",145.5,1,true,\n',
+        mapping,
+    )
+
+    assert staged["mapping_version"] == "2"
+    assert staged["csv_mapping"] == mapping
+    read_staged = client.get(
+        f"/api/v1/admin/imports/{staged['id']}", headers=HEADERS
+    ).json()
+    assert read_staged["mapping_version"] == "2"
+    assert read_staged["csv_mapping"] == mapping
+    row = client.get(
+        f"/api/v1/admin/imports/{staged['id']}/rows", headers=HEADERS
+    ).json()["items"][0]
+    assert row["properties"] == {
+        "callsign": "EA4",
+        "modes": ["FM", "DMR"],
+        "rx_frequency_mhz": 145.5,
+        "dmr_color_code": 1,
+        "enabled": True,
+        "optional": None,
+    }
+    committed = client.post(
+        f"/api/v1/admin/imports/{staged['id']}/commit",
+        headers=HEADERS,
+        json={"status": "published"},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["mapping_version"] == "2"
+    read_committed = client.get(
+        f"/api/v1/admin/imports/{staged['id']}", headers=HEADERS
+    ).json()
+    assert read_committed["mapping_version"] == "2"
+    assert read_committed["csv_mapping"] == mapping
+    properties = client.get("/api/v1/layers/mapping-typed").json()["features"][0][
+        "properties"
+    ]
+    assert {name: properties[name] for name in row["properties"]} == row["properties"]
+    assert isinstance(properties["rx_frequency_mhz"], float)
+    assert isinstance(properties["dmr_color_code"], int)
+    assert isinstance(properties["modes"], list)
+    assert isinstance(properties["enabled"], bool)
+    assert properties["optional"] is None
+
+
+def test_typed_numeric_identity_property_matches_existing_candidate() -> None:
+    layer = create_layer(
+        "mapping-typed-identity",
+        {"duplicate_detection": {"identity_properties": ["some_numeric_id"]}},
+    )
+    existing = client.post(
+        f"/api/v1/admin/layers/{layer['id']}/features",
+        headers=HEADERS,
+        json={
+            "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+            "properties": {"some_numeric_id": 42},
+            "status": "published",
+        },
+    )
+    assert existing.status_code == 200, existing.text
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,some_numeric_id\n-3.8,40.5,42\n",
+        {
+            "properties": {
+                "some_numeric_id": {"column": "some_numeric_id", "type": "number"}
+            }
+        },
+    )
+
+    assert staged["candidate_count"] == 1
+    row = client.get(
+        f"/api/v1/admin/imports/{staged['id']}/rows", headers=HEADERS
+    ).json()["items"][0]
+    assert row["candidate_feature_ids"] == [existing.json()["id"]]
+    assert row["candidate_matches"][0]["reasons"] == [
+        {"type": "property_exact", "property": "some_numeric_id", "value": 42.0}
+    ]
+    resolved = client.post(
+        f"/api/v1/admin/imports/{staged['id']}/rows/1/resolution",
+        headers=HEADERS,
+        json={"resolution": "import_anyway"},
+    )
+    assert resolved.status_code == 200, resolved.text
+    committed = client.post(
+        f"/api/v1/admin/imports/{staged['id']}/commit",
+        headers=HEADERS,
+        json={"status": "published"},
+    )
+    assert committed.status_code == 200, committed.text
+
+
+def test_typed_csv_mapping_converts_json_and_empty_cells_to_null() -> None:
+    layer = create_layer("mapping-json")
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,modes,details,empty\n"
+        '-3.7,40.4,"[""FM"", ""DMR""]","{""site"": ""A""}",\n',
+        {
+            "properties": {
+                "modes": {"column": "modes", "type": "json"},
+                "details": {"column": "details", "type": "json"},
+                "empty": {"column": "empty", "type": "string"},
+            }
+        },
+    )
+
+    row = client.get(
+        f"/api/v1/admin/imports/{staged['id']}/rows", headers=HEADERS
+    ).json()["items"][0]
+    assert row["properties"] == {
+        "modes": ["FM", "DMR"],
+        "details": {"site": "A"},
+        "empty": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("property_type", "value", "error"),
+    [
+        ("number", "abc", "Invalid number value for property 'value'"),
+        ("json", "[not json]", "Invalid JSON value for property 'value'"),
+    ],
+)
+def test_typed_csv_conversion_errors_are_row_level(
+    property_type: str, value: str, error: str
+) -> None:
+    layer = create_layer(f"mapping-invalid-{property_type}")
+    staged = stage(
+        layer["id"],
+        f"longitude,latitude,value\n-3.7,40.4,{value}\n",
+        {"properties": {"value": {"column": "value", "type": property_type}}},
+    )
+
+    assert staged["valid_count"] == 0
+    assert staged["invalid_count"] == 1
+    invalid = client.get(
+        f"/api/v1/admin/imports/{staged['id']}/rows?state=invalid", headers=HEADERS
+    ).json()["items"]
+    assert invalid[0]["validation_error"] == error
 
 
 def test_csv_default_mapping_collects_remaining_columns() -> None:

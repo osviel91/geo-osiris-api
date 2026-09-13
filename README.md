@@ -34,6 +34,20 @@ DATABASE_URL=postgresql+psycopg://osiris:<password>@localhost:5432/osiris alembi
 
 The initial migration creates `layers`, `features`, and `feature_provenance`. Feature geometry is PostGIS `GEOMETRY` in SRID 4326 with a GIST index. A feature may retain multiple provenance records. External identifiers are unique only within their layer.
 
+## CSV property mapping
+
+CSV mapping v1 uses property-to-column strings and retains every property as a string, including an empty cell:
+
+```json
+{"properties":{"callsign":"callsign"}}
+```
+
+CSV mapping v2 uses `{ "column", "type" }` property entries. Supported types are `string`, `number`, `integer`, `boolean`, and `json`; an omitted type defaults to `string`. A literal empty cell becomes JSON `null` for every v2 property type. Whitespace is not empty: it is preserved for `string`, trimmed for numeric/boolean conversion, and must be valid JSON for `json`. Boolean values are case-insensitive `true` or `false`; `number` must be finite; `integer` must contain only an optional sign and digits. Invalid conversions make only that staged row invalid.
+
+```json
+{"properties":{"modes":{"column":"modes","type":"json"},"rx_frequency_mhz":{"column":"rx_frequency_mhz","type":"number"}}}
+```
+
 ## Local development
 
 ```sh

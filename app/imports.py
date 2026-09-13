@@ -1,13 +1,16 @@
 import csv
 import io
 import json
+import math
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
 from geoalchemy2 import Geography
-from sqlalchemy import func, literal, or_, select
+from sqlalchemy import cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, selectinload
 
 from app.freshness import touch_layer_data
@@ -23,14 +26,16 @@ from app.schemas import (
 MAX_IMPORT_ROWS = 10_000
 MAX_CSV_FIELD_CHARS = 64_000
 MAX_CANDIDATES_PER_ROW = 5
-MAPPING_VERSION = "1"
+MAPPING_VERSION_V1 = "1"
+MAPPING_VERSION_V2 = "2"
+PROPERTY_TYPES = {"string", "number", "integer", "boolean", "json"}
 
 csv.field_size_limit(MAX_CSV_FIELD_CHARS)
 
 
 def stage_import(session: Session, payload: ImportCreate) -> ImportSummary:
     layer = _managed_layer(session, payload.layer_id)
-    records, headers, mapping = _parse_records(payload)
+    records, headers, mapping, mapping_version = _parse_records(payload)
     if len(records) > MAX_IMPORT_ROWS:
         raise HTTPException(
             status_code=422, detail=f"Import exceeds {MAX_IMPORT_ROWS} rows"
@@ -44,7 +49,7 @@ def stage_import(session: Session, payload: ImportCreate) -> ImportSummary:
         candidate_count=0,
         csv_mapping=mapping,
         csv_headers=headers,
-        mapping_version=MAPPING_VERSION,
+        mapping_version=mapping_version,
         source_name=payload.source_name,
         source_url=payload.source_url,
     )
@@ -192,7 +197,7 @@ def _stage_row(
 
 def _parse_records(
     payload: ImportCreate,
-) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any], str]:
     try:
         if payload.format == "geojson":
             document = json.loads(payload.content)
@@ -211,7 +216,7 @@ def _parse_records(
                 }
                 for feature in features
             ]
-            return records, [], {}
+            return records, [], {}, MAPPING_VERSION_V1
         return _parse_csv(payload.content, payload.csv_mapping)
     except (KeyError, TypeError, ValueError, csv.Error, json.JSONDecodeError) as error:
         raise HTTPException(
@@ -221,17 +226,17 @@ def _parse_records(
 
 def _parse_csv(
     content: str, mapping: dict[str, Any]
-) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any], str]:
     reader = csv.DictReader(io.StringIO(content))
     headers = list(reader.fieldnames or [])
-    normalized = _normalize_csv_mapping(mapping, headers)
+    normalized, mapping_version = _normalize_csv_mapping(mapping, headers)
     records = [_csv_record(row, normalized) for row in reader]
-    return records, headers, normalized
+    return records, headers, normalized, mapping_version
 
 
 def _normalize_csv_mapping(
     mapping: dict[str, Any], headers: list[str]
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     if not isinstance(mapping, dict):
         raise ValueError("csv_mapping must be an object")
     longitude = mapping.get("longitude") or "longitude"
@@ -252,13 +257,9 @@ def _normalize_csv_mapping(
         raise ValueError("CSV properties mapping must be an object")
     if longitude == latitude:
         raise ValueError("longitude and latitude must map to different columns")
-    for name, column in property_columns.items():
+    for name in property_columns:
         if not isinstance(name, str) or not name:
             raise ValueError("CSV property names must be non-empty strings")
-        if not isinstance(column, str) or not column:
-            raise ValueError("CSV property columns must be header names")
-        if column in {longitude, latitude}:
-            raise ValueError("CSV property columns cannot reuse coordinate columns")
     for column in (longitude, latitude):
         if column not in headers:
             raise ValueError(f"CSV is missing mapped column '{column}'")
@@ -267,25 +268,62 @@ def _normalize_csv_mapping(
     reserved = {longitude, latitude}
     if external_id:
         reserved.add(external_id)
+    uses_typed_mapping = False
+    resolved: dict[str, Any] = {}
     if property_columns:
-        resolved = dict(property_columns)
-        for column in resolved.values():
+        for name, specification in property_columns.items():
+            if isinstance(specification, str):
+                column = specification
+                property_type = "string"
+            elif isinstance(specification, dict):
+                column = specification.get("column")
+                property_type = specification.get("type", "string")
+                uses_typed_mapping = True
+            else:
+                raise ValueError(
+                    "CSV property mappings must be column strings or objects"
+                )
+            if not isinstance(column, str) or not column:
+                raise ValueError("CSV property columns must be header names")
+            if column in {longitude, latitude}:
+                raise ValueError("CSV property columns cannot reuse coordinate columns")
             if column not in headers:
                 raise ValueError(f"CSV is missing mapped column '{column}'")
+            if (
+                not isinstance(property_type, str)
+                or property_type not in PROPERTY_TYPES
+            ):
+                raise ValueError(f"Unsupported CSV property type '{property_type}'")
+            resolved[name] = (
+                {"column": column, "type": property_type}
+                if uses_typed_mapping
+                else column
+            )
+        if uses_typed_mapping:
+            resolved = {
+                name: (
+                    specification
+                    if isinstance(specification, dict)
+                    else {"column": specification, "type": "string"}
+                )
+                for name, specification in resolved.items()
+            }
     else:
         resolved = {header: header for header in headers if header not in reserved}
-    return {
+    normalized = {
         "longitude": longitude,
         "latitude": latitude,
         "external_id": external_id,
         "properties": resolved,
     }
+    return (
+        normalized,
+        MAPPING_VERSION_V2 if uses_typed_mapping else MAPPING_VERSION_V1,
+    )
 
 
 def _csv_record(row: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
-    properties = {
-        name: row.get(column) for name, column in mapping["properties"].items()
-    }
+    properties: dict[str, Any] = {}
     external_id = (
         row.get(mapping["external_id"]) or None if mapping["external_id"] else None
     )
@@ -294,6 +332,17 @@ def _csv_record(row: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
         "properties": properties,
         "geometry": None,
     }
+    try:
+        for name, specification in mapping["properties"].items():
+            if isinstance(specification, str):
+                properties[name] = row.get(specification)
+            else:
+                properties[name] = _csv_property_value(
+                    row.get(specification["column"]), specification["type"], name
+                )
+    except ValueError as error:
+        record["error"] = str(error)
+        return record
     longitude_raw = row.get(mapping["longitude"])
     latitude_raw = row.get(mapping["latitude"])
     if longitude_raw in (None, ""):
@@ -317,6 +366,40 @@ def _csv_record(row: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
         "coordinates": [longitude, latitude],
     }
     return record
+
+
+def _csv_property_value(value: str | None, property_type: str, name: str) -> Any:
+    if value in (None, ""):
+        return None
+    if property_type == "string":
+        return value
+    if property_type == "number":
+        try:
+            number = float(value)
+        except ValueError as error:
+            raise ValueError(f"Invalid number value for property '{name}'") from error
+        if math.isfinite(number):
+            return number
+        raise ValueError(f"Invalid number value for property '{name}'")
+    if property_type == "integer":
+        if re.fullmatch(r"[+-]?\d+", value.strip()):
+            return int(value)
+        raise ValueError(f"Invalid integer value for property '{name}'")
+    if property_type == "boolean":
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+        raise ValueError(f"Invalid boolean value for property '{name}'")
+    try:
+        return json.loads(value, parse_constant=_reject_json_constant)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid JSON value for property '{name}'") from error
+
+
+def _reject_json_constant(_: str) -> None:
+    raise ValueError("Invalid JSON constant")
 
 
 def _duplicate_detection(layer: Layer) -> tuple[list[str], float | None]:
@@ -354,7 +437,9 @@ def _candidate_matches(
     for prop in identity_properties:
         value = properties.get(prop)
         if value not in (None, ""):
-            predicates.append(Feature.properties[prop].astext == str(value))
+            predicates.append(
+                Feature.properties[prop] == cast(literal(json.dumps(value)), JSONB)
+            )
 
     spatial = (
         radius is not None
