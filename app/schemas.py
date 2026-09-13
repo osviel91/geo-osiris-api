@@ -10,6 +10,8 @@ class CompatibilityLayer(BaseModel):
     name: str
     description: str
     endpoint: str
+    revision: int = 0
+    data_updated_at: datetime | None = None
 
 
 class CompatibilityLayersResponse(BaseModel):
@@ -49,6 +51,8 @@ class LayerSummary(BaseModel):
     geometry_types: list[str]
     enabled: bool
     feature_count: int
+    revision: int
+    data_updated_at: datetime | None
     updated_at: datetime
 
 

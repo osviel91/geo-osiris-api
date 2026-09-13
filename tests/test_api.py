@@ -45,6 +45,8 @@ def test_layers_lists_test_layer(monkeypatch) -> None:
             "name": "Test Layer",
             "description": "Static validation layer",
             "endpoint": "/layers/test",
+            "revision": 0,
+            "data_updated_at": None,
         }
     ]
 

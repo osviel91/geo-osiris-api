@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.freshness import touch_layer_data
 from app.geometry import validate_geometry, validate_properties
 from app.models import ExternalSource, Feature, FeatureProvenance
 
@@ -92,6 +93,7 @@ def _reconcile(
             select(Feature).where(Feature.layer_id == source.layer_id)
         )
     }
+    data_changed = False
     for external_id, record in incoming.items():
         previous = existing.pop(external_id, None)
         if previous is None:
@@ -104,6 +106,7 @@ def _reconcile(
             )
             session.add(feature)
             _provenance(feature, source, record)
+            data_changed = True
             continue
         feature = previous
         changed = (
@@ -120,10 +123,14 @@ def _reconcile(
             feature.status = "published"
             feature.archived_at = None
             _provenance(feature, source, record)
+            data_changed = True
     for feature in existing.values():
         if feature.archived_at is None:
             feature.status = "archived"
             feature.archived_at = datetime.now(UTC)
+            data_changed = True
+    if data_changed:
+        touch_layer_data(session, source.layer_id)
 
 
 def _provenance(

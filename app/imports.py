@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.freshness import touch_layer_data
 from app.geometry import validate_geometry, validate_properties
 from app.models import Feature, FeatureProvenance, ImportJob, ImportRow, Layer
 from app.schemas import ImportCommit, ImportCreate, ImportRowSummary, ImportSummary
@@ -74,6 +75,8 @@ def commit_import(
         session.add(feature)
     job.status = "committed"
     job.committed_at = datetime.now(UTC)
+    if payload.status == "published" and job.rows:
+        touch_layer_data(session, job.layer_id)
     session.commit()
     return _summary(job)
 

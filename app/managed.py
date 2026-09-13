@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.freshness import touch_layer_data
 from app.geometry import validate_geometry, validate_properties
 from app.models import Feature, FeatureProvenance, Layer
 from app.schemas import FeatureWrite, LayerCreate, LayerUpdate
@@ -57,6 +58,8 @@ def create_feature(
         )
     )
     session.add(feature)
+    if payload.status == "published":
+        touch_layer_data(session, layer.id)
     session.commit()
     session.refresh(feature)
     return feature
@@ -71,6 +74,7 @@ def update_feature(
     layer = _managed_layer(session, feature.layer_id)
     validate_geometry(payload.geometry, layer.geometry_types)
     validate_properties(payload.properties)
+    published_affected = feature.status == "published" or payload.status == "published"
     feature.external_id = payload.external_id
     feature.geometry = func.ST_SetSRID(
         func.ST_GeomFromGeoJSON(json.dumps(payload.geometry)), 4326
@@ -79,6 +83,8 @@ def update_feature(
     feature.status = payload.status
     feature.verified_at = payload.verified_at
     feature.archived_at = None if payload.status != "archived" else datetime.now(UTC)
+    if published_affected:
+        touch_layer_data(session, feature.layer_id)
     session.commit()
     session.refresh(feature)
     return feature
@@ -89,8 +95,11 @@ def archive_feature(session: Session, feature_id: uuid.UUID) -> None:
     if feature is None:
         raise HTTPException(status_code=404, detail="Feature not found")
     _managed_layer(session, feature.layer_id)
+    was_published = feature.status == "published"
     feature.status = "archived"
     feature.archived_at = datetime.now(UTC)
+    if was_published:
+        touch_layer_data(session, feature.layer_id)
     session.commit()
 
 

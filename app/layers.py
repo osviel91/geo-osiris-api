@@ -29,6 +29,8 @@ def list_layers(session: Session) -> list[LayerSummary]:
             geometry_types=layer.geometry_types,
             enabled=layer.enabled,
             feature_count=count,
+            revision=layer.revision,
+            data_updated_at=layer.data_updated_at,
             updated_at=layer.updated_at,
         )
         for layer, count in session.execute(statement)

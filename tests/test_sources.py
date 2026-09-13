@@ -140,6 +140,71 @@ def test_external_source_sync_is_idempotent_and_preserves_last_good_data(
         ADAPTERS.pop("fixture", None)
 
 
+def test_external_sync_updates_layer_revision(monkeypatch) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "station-1",
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"name": "Original"},
+            }
+        ]
+    )
+    register_adapter("freshness-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-freshness",
+                name="External freshness",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-freshness",
+                adapter="freshness-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id, layer_id = source.id, layer.id
+
+        monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+        headers = {"Authorization": "Bearer test-token"}
+        endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+
+        def revision() -> int:
+            with Session(engine) as session:
+                persisted = session.get(Layer, layer_id)
+                assert persisted is not None
+                return persisted.revision
+
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        assert revision() == 1
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        assert revision() == 1
+
+        adapter.records = [
+            {
+                "id": "station-1",
+                "geometry": {"type": "Point", "coordinates": [-3.8, 40.5]},
+                "properties": {"name": "Updated"},
+            }
+        ]
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        assert revision() == 2
+
+        adapter.records = []
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        assert revision() == 3
+    finally:
+        ADAPTERS.pop("freshness-fixture", None)
+
+
 def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(
     monkeypatch,
 ) -> None:

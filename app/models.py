@@ -3,6 +3,7 @@ from datetime import datetime
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -34,6 +35,8 @@ class Layer(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     style: Mapped[dict] = mapped_column(JSONB, default=dict)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    revision: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    data_updated_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now()

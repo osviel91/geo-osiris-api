@@ -280,6 +280,8 @@ def layers(session: Session = Depends(get_session)) -> CompatibilityLayersRespon
                 name=layer.name,
                 description="" if layer.description is None else layer.description,
                 endpoint=f"/layers/{layer.slug}",
+                revision=layer.revision,
+                data_updated_at=layer.data_updated_at,
             )
             for layer in list_compatibility_layers(session)
         ]

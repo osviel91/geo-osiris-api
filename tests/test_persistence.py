@@ -102,12 +102,16 @@ def test_persisted_layer_serializes_to_public_and_compatibility_geojson() -> Non
                 "name": "Test Layer",
                 "description": "Static validation layer",
                 "endpoint": "/layers/test",
+                "revision": 0,
+                "data_updated_at": None,
             },
             {
                 "id": "test-persisted",
                 "name": "Persisted Test Layer",
                 "description": "Stored in PostGIS",
                 "endpoint": "/layers/test-persisted",
+                "revision": 0,
+                "data_updated_at": None,
             },
         ]
     }
@@ -268,6 +272,131 @@ def test_admin_manages_and_archives_generic_radio_features(monkeypatch) -> None:
     archived = client.delete(f"/api/v1/admin/features/{feature_id}", headers=headers)
     assert archived.status_code == 200
     assert client.get("/api/v1/layers/managed-radio").json()["features"] == []
+
+
+def _freshness(layer_id: str) -> tuple[int, datetime | None]:
+    with Session(engine) as session:
+        layer = session.get(Layer, uuid.UUID(layer_id))
+        assert layer is not None
+        return layer.revision, layer.data_updated_at
+
+
+def test_layer_freshness_tracks_published_data_only(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+    layer_id = client.post(
+        "/api/v1/admin/layers",
+        headers=headers,
+        json={
+            "slug": "freshness",
+            "name": "Freshness",
+            "category": "TEST",
+            "mode": "managed",
+            "geometry_types": ["Point"],
+        },
+    ).json()["id"]
+
+    assert _freshness(layer_id) == (0, None)
+
+    assert (
+        client.patch(
+            f"/api/v1/admin/layers/{layer_id}",
+            headers=headers,
+            json={"name": "Renamed", "style": {"marker": "dot"}},
+        ).status_code
+        == 200
+    )
+    assert _freshness(layer_id) == (0, None)
+
+    draft = client.post(
+        f"/api/v1/admin/layers/{layer_id}/features",
+        headers=headers,
+        json={
+            "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+            "properties": {"callsign": "FRESH-1"},
+            "status": "draft",
+        },
+    ).json()
+    assert _freshness(layer_id) == (0, None)
+
+    feature_id = draft["id"]
+    assert (
+        client.patch(
+            f"/api/v1/admin/features/{feature_id}",
+            headers=headers,
+            json={
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"callsign": "FRESH-1"},
+                "status": "published",
+            },
+        ).status_code
+        == 200
+    )
+    revision, updated_at = _freshness(layer_id)
+    assert revision == 1
+    assert updated_at is not None
+
+    assert (
+        client.patch(
+            f"/api/v1/admin/features/{feature_id}",
+            headers=headers,
+            json={
+                "geometry": {"type": "Point", "coordinates": [-3.8, 40.5]},
+                "properties": {"callsign": "FRESH-1"},
+                "status": "published",
+            },
+        ).status_code
+        == 200
+    )
+    assert _freshness(layer_id)[0] == 2
+
+    assert (
+        client.delete(
+            f"/api/v1/admin/features/{feature_id}", headers=headers
+        ).status_code
+        == 200
+    )
+    assert _freshness(layer_id)[0] == 3
+
+    draft_import = client.post(
+        "/api/v1/admin/imports",
+        headers=headers,
+        json={
+            "layer_id": layer_id,
+            "filename": "draft.csv",
+            "format": "csv",
+            "content": "longitude,latitude,callsign\n-3.9,40.6,FRESH-2\n",
+        },
+    ).json()
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{draft_import['id']}/commit",
+            headers=headers,
+            json={"status": "draft"},
+        ).status_code
+        == 200
+    )
+    assert _freshness(layer_id)[0] == 3
+
+    published_import = client.post(
+        "/api/v1/admin/imports",
+        headers=headers,
+        json={
+            "layer_id": layer_id,
+            "filename": "published.csv",
+            "format": "csv",
+            "content": "longitude,latitude,callsign\n-4.0,40.7,FRESH-3\n",
+        },
+    ).json()
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{published_import['id']}/commit",
+            headers=headers,
+            json={"status": "published"},
+        ).status_code
+        == 200
+    )
+    assert _freshness(layer_id)[0] == 4
 
 
 def test_geojson_staging_validates_and_cancels_without_creating_features(
