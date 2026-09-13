@@ -11,3 +11,32 @@ services:
       APP_PORT: 8000
       LOG_LEVEL: INFO
       CORS_ORIGINS: "*"
+      DATABASE_URL: postgresql+psycopg://osiris:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgis:5432/osiris
+    depends_on:
+      postgis:
+        condition: service_healthy
+    networks:
+      - default
+      - geo-osiris_default
+
+  postgis:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: osiris
+      POSTGRES_USER: osiris
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osiris -d osiris"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgis-data:
+
+networks:
+  geo-osiris_default:
+    external: true

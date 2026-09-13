@@ -9,6 +9,8 @@ WORKDIR /app
 
 COPY requirements.txt ./
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt \
     && useradd --create-home --uid 10001 appuser
 
