@@ -132,6 +132,9 @@ class ImportJob(Base):
     row_count: Mapped[int] = mapped_column(default=0)
     invalid_count: Mapped[int] = mapped_column(default=0)
     candidate_count: Mapped[int] = mapped_column(default=0)
+    csv_mapping: Mapped[dict] = mapped_column(JSONB, default=dict)
+    csv_headers: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    mapping_version: Mapped[str] = mapped_column(String(20), default="1")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     committed_at: Mapped[datetime | None]
     cancelled_at: Mapped[datetime | None]

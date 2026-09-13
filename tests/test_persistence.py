@@ -504,7 +504,10 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
     )
 
     assert candidates.json()["candidate_count"] == 1
-    assert candidates.json()["rows"][0]["candidate_feature_ids"] == [existing["id"]]
+    candidate_rows = client.get(
+        f"/api/v1/admin/imports/{candidates.json()['id']}/rows", headers=headers
+    ).json()
+    assert candidate_rows["items"][0]["candidate_feature_ids"] == [existing["id"]]
     assert (
         client.post(
             f"/api/v1/admin/imports/{candidates.json()['id']}/commit",

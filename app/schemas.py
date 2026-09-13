@@ -137,12 +137,6 @@ class ImportCommit(BaseModel):
     status: Literal["draft", "published"] = "draft"
 
 
-class ImportRowSummary(BaseModel):
-    row_number: int
-    validation_error: str | None
-    candidate_feature_ids: list[str]
-
-
 class ImportSummary(BaseModel):
     id: str
     layer_id: str
@@ -150,9 +144,12 @@ class ImportSummary(BaseModel):
     format: str
     status: str
     row_count: int
+    valid_count: int
     invalid_count: int
     candidate_count: int
-    rows: list[ImportRowSummary]
+    csv_mapping: dict[str, Any]
+    csv_headers: list[str]
+    mapping_version: str
 
 
 class ExternalSourceSummary(BaseModel):
