@@ -1,14 +1,18 @@
 # OSIRIS Geo API
 
-Small, stateless GeoJSON API intended to supply custom layers to OSIRIS. It ships one public static validation layer and has no database, credentials, or private coordinates.
+GeoJSON API and PostGIS-backed Geo Data Hub for OSIRIS. OSIRIS remains a read-only client; management and source ingestion are added in later Phase 3 commits.
 
 ## API
 
 | Endpoint | Response |
 | --- | --- |
 | `GET /health` | `{"status":"ok"}` |
+| `GET /ready` | Database readiness |
 | `GET /layers` | Available layer metadata |
 | `GET /layers/test` | Static RFC 7946-style GeoJSON FeatureCollection |
+| `GET /api/v1/layers` | Enabled persistent-layer summaries |
+| `GET /api/v1/layers/{slug}` | Published persistent GeoJSON FeatureCollection |
+| `GET /api/v1/layers/{slug}/features` | Alias for the layer GeoJSON collection |
 
 Example response:
 
@@ -17,6 +21,18 @@ Example response:
 ```
 
 OpenAPI documentation is available at `/docs`.
+
+`/layers`, `/layers/test`, and their response shapes are retained for OSIRIS compatibility. The static `test` layer remains available if PostGIS is unavailable; persistent layers require `/ready` to be healthy.
+
+## Database and migrations
+
+PostGIS is required for persistent layers. Apply migrations explicitly, before starting a new Geo API image:
+
+```sh
+DATABASE_URL=postgresql+psycopg://osiris:<password>@localhost:5432/osiris alembic upgrade head
+```
+
+The initial migration creates `layers`, `features`, and `feature_provenance`. Feature geometry is PostGIS `GEOMETRY` in SRID 4326 with a GIST index. A feature may retain multiple provenance records. External identifiers are unique only within their layer.
 
 ## Local development
 
@@ -45,6 +61,8 @@ Copy `.env.example` for local reference. The application reads these environment
 | `LOG_LEVEL` | `INFO` | Stdout logging level |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins |
 | `HOST_PORT` | `8000` | Host port used by `deploy/compose.yml` |
+| `DATABASE_URL` | none | PostgreSQL/PostGIS SQLAlchemy URL |
+| `POSTGRES_PASSWORD` | none | Password for the Compose PostGIS service |
 
 For LAN production, set `CORS_ORIGINS` to the OSIRIS URL, for example `http://osiris.lan:3000`, rather than `*`.
 
@@ -57,7 +75,7 @@ curl http://localhost:8000/health
 curl http://localhost:8000/layers/test
 ```
 
-The published image is `ghcr.io/osviel91/geo-osiris-api:latest`. The container runs as a non-root user and has an HTTP health check.
+The container runs as a non-root user and has an HTTP liveness check. `/health` does not check PostGIS; use `/ready` for readiness.
 
 ## Portainer
 
@@ -66,6 +84,8 @@ The published image is `ghcr.io/osviel91/geo-osiris-api:latest`. The container r
 3. Set `CORS_ORIGINS` in the stack environment to the actual OSIRIS origin before deployment.
 4. Optionally set `HOST_PORT` in the Portainer environment, for example `8080`; the API will then be available at `http://<ZIMA-IP>:8080`.
 5. If GitOps updates are available, enable image re-pull/forced redeploy. Otherwise, redeploy the stack manually after an image publication.
+
+The Compose stack starts an internal PostGIS service and joins the existing `geo-osiris_default` network. Set `POSTGRES_PASSWORD` in Portainer and run `docker compose -f deploy/compose.yml run --rm geo-api alembic upgrade head` from the new image before switching traffic. Do not expose the PostGIS service publicly.
 
 The service is then available at `http://<ZIMA-IP>:8000/health` and `http://<ZIMA-IP>:8000/layers/test`. Public GHCR packages need no registry credential; for a private package, configure a Portainer GHCR registry credential with package-read-only access.
 

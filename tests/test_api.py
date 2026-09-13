@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.main import TEST_FEATURES, FeatureCollection, app
+from app.main import TEST_FEATURES, app
+from app.schemas import StaticFeatureCollection
 
 client = TestClient(app)
 
@@ -10,6 +11,23 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_ready_checks_database(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.is_ready", lambda: True)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_ready_returns_service_unavailable_for_database_failure(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.is_ready", lambda: False)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
 
 
 def test_layers_lists_test_layer() -> None:
@@ -33,7 +51,7 @@ def test_test_layer_is_valid_geojson() -> None:
     assert response.status_code == 200
     assert payload["type"] == "FeatureCollection"
     assert len(payload["features"]) >= 1
-    assert FeatureCollection.model_validate(payload).features == TEST_FEATURES
+    assert StaticFeatureCollection.model_validate(payload).features == TEST_FEATURES
     for feature in payload["features"]:
         assert feature["geometry"]["type"] == "Point"
         longitude, latitude = feature["geometry"]["coordinates"]

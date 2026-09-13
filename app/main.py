@@ -1,53 +1,31 @@
 import logging
 import os
-from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.database import get_session, is_ready
+from app.layers import get_layer_geojson, list_compatibility_layers, list_layers
+from app.schemas import (
+    CompatibilityLayer,
+    CompatibilityLayersResponse,
+    GeoJSONFeatureCollection,
+    LayerSummary,
+    PointGeometry,
+    StaticFeature,
+    StaticFeatureCollection,
+    StaticFeatureProperties,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logger = logging.getLogger(__name__)
 
-
-class Layer(BaseModel):
-    id: str
-    name: str
-    description: str
-    endpoint: str
-
-
-class LayersResponse(BaseModel):
-    layers: list[Layer]
-
-
-class PointGeometry(BaseModel):
-    type: Literal["Point"]
-    coordinates: tuple[float, float]
-
-
-class FeatureProperties(BaseModel):
-    id: str
-    name: str
-    source: str
-    category: str
-    status: str
-
-
-class Feature(BaseModel):
-    type: Literal["Feature"]
-    geometry: PointGeometry
-    properties: FeatureProperties
-
-
-class FeatureCollection(BaseModel):
-    type: Literal["FeatureCollection"]
-    features: list[Feature]
-
-
-TEST_LAYER = Layer(
+TEST_LAYER = CompatibilityLayer(
     id="test",
     name="Test Layer",
     description="Static validation layer",
@@ -55,10 +33,9 @@ TEST_LAYER = Layer(
 )
 
 TEST_FEATURES = [
-    Feature(
-        type="Feature",
+    StaticFeature(
         geometry=PointGeometry(type="Point", coordinates=(-3.7038, 40.4168)),
-        properties=FeatureProperties(
+        properties=StaticFeatureProperties(
             id="test-1",
             name="Madrid test point",
             source="local",
@@ -66,10 +43,9 @@ TEST_FEATURES = [
             status="online",
         ),
     ),
-    Feature(
-        type="Feature",
+    StaticFeature(
         geometry=PointGeometry(type="Point", coordinates=(2.1734, 41.3851)),
-        properties=FeatureProperties(
+        properties=StaticFeatureProperties(
             id="test-2",
             name="Barcelona test point",
             source="local",
@@ -77,10 +53,9 @@ TEST_FEATURES = [
             status="online",
         ),
     ),
-    Feature(
-        type="Feature",
+    StaticFeature(
         geometry=PointGeometry(type="Point", coordinates=(-0.3763, 39.4699)),
-        properties=FeatureProperties(
+        properties=StaticFeatureProperties(
             id="test-3",
             name="Valencia test point",
             source="local",
@@ -92,7 +67,7 @@ TEST_FEATURES = [
 
 origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",")]
 
-app = FastAPI(title="OSIRIS Geo API", version="0.1.0")
+app = FastAPI(title="OSIRIS Geo API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -107,11 +82,65 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/layers", response_model=LayersResponse)
-def layers() -> LayersResponse:
-    return LayersResponse(layers=[TEST_LAYER])
+@app.get("/ready")
+def ready() -> dict[str, str]:
+    if not is_ready():
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    return {"status": "ok"}
 
 
-@app.get("/layers/test", response_model=FeatureCollection)
-def test_layer() -> FeatureCollection:
-    return FeatureCollection(type="FeatureCollection", features=TEST_FEATURES)
+@app.get("/api/v1/layers", response_model=list[LayerSummary])
+def public_layers(session: Session = Depends(get_session)) -> list[LayerSummary]:
+    try:
+        return list_layers(session)
+    except SQLAlchemyError as error:
+        logger.exception("Could not list persisted layers")
+        raise HTTPException(status_code=503, detail="Database unavailable") from error
+
+
+@app.get("/api/v1/layers/{slug}", response_model=GeoJSONFeatureCollection)
+def public_layer(
+    slug: str, session: Session = Depends(get_session)
+) -> GeoJSONFeatureCollection:
+    try:
+        return get_layer_geojson(session, slug)
+    except SQLAlchemyError as error:
+        logger.exception("Could not load persisted layer", extra={"layer": slug})
+        raise HTTPException(status_code=503, detail="Database unavailable") from error
+
+
+@app.get("/api/v1/layers/{slug}/features", response_model=GeoJSONFeatureCollection)
+def public_layer_features(
+    slug: str, session: Session = Depends(get_session)
+) -> GeoJSONFeatureCollection:
+    return public_layer(slug, session)
+
+
+@app.get("/layers", response_model=CompatibilityLayersResponse)
+def layers(session: Session = Depends(get_session)) -> CompatibilityLayersResponse:
+    try:
+        persisted = [
+            CompatibilityLayer(
+                id=layer.slug,
+                name=layer.name,
+                description="" if layer.description is None else layer.description,
+                endpoint=f"/layers/{layer.slug}",
+            )
+            for layer in list_compatibility_layers(session)
+        ]
+    except SQLAlchemyError:
+        logger.exception("Could not list persisted compatibility layers")
+        persisted = []
+    return CompatibilityLayersResponse(layers=[TEST_LAYER, *persisted])
+
+
+@app.get("/layers/test", response_model=StaticFeatureCollection)
+def test_layer() -> StaticFeatureCollection:
+    return StaticFeatureCollection(features=TEST_FEATURES)
+
+
+@app.get("/layers/{slug}", response_model=GeoJSONFeatureCollection)
+def compatibility_layer(
+    slug: str, session: Session = Depends(get_session)
+) -> GeoJSONFeatureCollection:
+    return public_layer(slug, session)
