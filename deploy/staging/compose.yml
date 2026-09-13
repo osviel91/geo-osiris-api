@@ -21,6 +21,7 @@ services:
 
   geo-api:
     image: ${GEO_API_IMAGE:-geo-osiris-api:sha-0ef6d4a}
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       APP_ENV: production
@@ -39,6 +40,7 @@ services:
 
   geo-admin:
     image: ${GEO_ADMIN_IMAGE:-geo-osiris-admin:sha-0926b36}
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       GEO_API_URL: http://geo-api:8000
@@ -53,6 +55,7 @@ services:
 
   osiris:
     image: ${OSIRIS_IMAGE:-osiris:sha-a353dce}
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       NODE_ENV: production
