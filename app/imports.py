@@ -6,16 +6,23 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from geoalchemy2 import Geography
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.freshness import touch_layer_data
 from app.geometry import validate_geometry, validate_properties
 from app.models import Feature, FeatureProvenance, ImportJob, ImportRow, Layer
-from app.schemas import ImportCommit, ImportCreate, ImportSummary
+from app.schemas import (
+    ImportCommit,
+    ImportCreate,
+    ImportRowResolution,
+    ImportSummary,
+)
 
 MAX_IMPORT_ROWS = 10_000
 MAX_CSV_FIELD_CHARS = 64_000
+MAX_CANDIDATES_PER_ROW = 5
 MAPPING_VERSION = "1"
 
 csv.field_size_limit(MAX_CSV_FIELD_CHARS)
@@ -57,12 +64,24 @@ def commit_import(
     job = _job(session, import_id)
     if job.status != "validated":
         raise HTTPException(status_code=409, detail="Import is no longer pending")
-    if job.invalid_count or job.candidate_count:
+    if job.invalid_count:
+        raise HTTPException(
+            status_code=409, detail="Resolve invalid rows before committing"
+        )
+    unresolved = [
+        row for row in job.rows if row.candidate_feature_ids and row.resolution is None
+    ]
+    if unresolved:
         raise HTTPException(
             status_code=409,
-            detail="Resolve invalid rows and duplicate candidates before committing",
+            detail="Resolve duplicate candidates before committing",
         )
-    for row in job.rows:
+    committed = [
+        row
+        for row in job.rows
+        if row.validation_error is None and row.resolution != "skip"
+    ]
+    for row in committed:
         feature = Feature(
             layer_id=job.layer_id,
             external_id=row.external_id,
@@ -83,7 +102,7 @@ def commit_import(
         session.add(feature)
     job.status = "committed"
     job.committed_at = datetime.now(UTC)
-    if payload.status == "published" and job.rows:
+    if payload.status == "published" and committed:
         touch_layer_data(session, job.layer_id)
     session.commit()
     return _summary(job)
@@ -93,10 +112,40 @@ def cancel_import(session: Session, import_id: uuid.UUID) -> None:
     job = _job(session, import_id)
     if job.status != "validated":
         raise HTTPException(status_code=409, detail="Import is no longer pending")
-    job.rows.clear()
     job.status = "cancelled"
     job.cancelled_at = datetime.now(UTC)
     session.commit()
+
+
+def resolve_import_row(
+    session: Session,
+    import_id: uuid.UUID,
+    row_number: int,
+    payload: ImportRowResolution,
+) -> ImportRow:
+    job = session.get(ImportJob, import_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Import not found")
+    if job.status != "validated":
+        raise HTTPException(
+            status_code=409, detail="Only validated imports can be resolved"
+        )
+    row = session.scalar(
+        select(ImportRow).where(
+            ImportRow.import_id == import_id, ImportRow.row_number == row_number
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Import row not found")
+    if not row.candidate_feature_ids:
+        raise HTTPException(
+            status_code=409, detail="Row has no duplicate candidates to resolve"
+        )
+    row.resolution = payload.resolution
+    row.resolved_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(row)
+    return row
 
 
 def _stage_row(
@@ -127,14 +176,14 @@ def _stage_row(
             validation_error=error,
             candidate_feature_ids=[],
         )
+    matches = _candidate_matches(session, layer, geometry, external_id, properties)
     return ImportRow(
         row_number=row_number,
         external_id=external_id,
         geometry=geometry,
         properties=properties,
-        candidate_feature_ids=_candidate_ids(
-            session, layer.id, external_id, properties
-        ),
+        candidate_feature_ids=[match["feature_id"] for match in matches],
+        candidate_matches=matches,
     )
 
 
@@ -267,33 +316,141 @@ def _csv_record(row: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def _candidate_ids(
-    session: Session, layer_id: uuid.UUID, external_id: str | None, properties: dict
-) -> list[str]:
-    matches = []
+def _duplicate_detection(layer: Layer) -> tuple[list[str], float | None]:
+    config = layer.metadata_.get("duplicate_detection")
+    if not isinstance(config, dict):
+        return [], None
+    raw_properties = config.get("identity_properties")
+    identity_properties = (
+        [prop for prop in raw_properties if isinstance(prop, str) and prop]
+        if isinstance(raw_properties, list)
+        else []
+    )
+    raw_radius = config.get("coordinate_radius_m")
+    radius = (
+        float(raw_radius)
+        if isinstance(raw_radius, (int, float))
+        and not isinstance(raw_radius, bool)
+        and raw_radius > 0
+        else None
+    )
+    return identity_properties, radius
+
+
+def _candidate_matches(
+    session: Session,
+    layer: Layer,
+    geometry: dict[str, Any],
+    external_id: str | None,
+    properties: dict[str, Any],
+) -> list[dict[str, Any]]:
+    identity_properties, radius = _duplicate_detection(layer)
+    predicates = []
     if external_id:
-        matches.append(Feature.external_id == external_id)
-    callsign = properties.get("callsign")
-    if callsign:
-        matches.append(Feature.properties["callsign"].astext == str(callsign))
-    if not matches:
+        predicates.append(Feature.external_id == external_id)
+    for prop in identity_properties:
+        value = properties.get(prop)
+        if value not in (None, ""):
+            predicates.append(Feature.properties[prop].astext == str(value))
+
+    spatial = (
+        radius is not None
+        and isinstance(geometry, dict)
+        and geometry.get("type") == "Point"
+    )
+    geometry_expr = _geometry(geometry) if spatial else None
+    if spatial:
+        predicates.append(
+            func.ST_DWithin(
+                func.cast(Feature.geometry, Geography),
+                func.cast(geometry_expr, Geography),
+                radius,
+            )
+        )
+    if not predicates:
         return []
+
+    distance = (
+        func.ST_Distance(
+            func.cast(Feature.geometry, Geography),
+            func.cast(geometry_expr, Geography),
+        ).label("distance_m")
+        if spatial
+        else literal(None).label("distance_m")
+    )
     statement = (
-        select(Feature.id)
+        select(
+            Feature.id,
+            Feature.external_id,
+            Feature.properties,
+            Feature.status,
+            func.ST_AsGeoJSON(Feature.geometry).label("geometry_json"),
+            distance,
+        )
         .where(
-            Feature.layer_id == layer_id,
+            Feature.layer_id == layer.id,
             Feature.archived_at.is_(None),
-            or_(*matches),
+            or_(*predicates),
         )
         .order_by(Feature.id)
+        .limit(MAX_CANDIDATES_PER_ROW)
     )
-    return [str(feature_id) for feature_id in session.scalars(statement)]
+
+    matches = []
+    for row in session.execute(statement).mappings():
+        reasons = []
+        if external_id and row["external_id"] == external_id:
+            reasons.append({"type": "external_id", "value": external_id})
+        for prop in identity_properties:
+            value = properties.get(prop)
+            if value not in (None, "") and row["properties"].get(prop) == value:
+                reasons.append(
+                    {"type": "property_exact", "property": prop, "value": value}
+                )
+        if (
+            spatial
+            and row["distance_m"] is not None
+            and float(row["distance_m"]) <= radius
+        ):
+            reasons.append(
+                {
+                    "type": "spatial_proximity",
+                    "distance_m": round(float(row["distance_m"]), 1),
+                    "threshold_m": radius,
+                }
+            )
+        if not reasons:
+            continue
+        matches.append(
+            {
+                "feature_id": str(row["id"]),
+                "reasons": reasons,
+                "summary": _candidate_summary(layer, row),
+            }
+        )
+    return matches
+
+
+def _candidate_summary(layer: Layer, row: Any) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "external_id": row["external_id"],
+        "status": row["status"],
+    }
+    geometry = json.loads(row["geometry_json"])
+    if geometry.get("type") == "Point":
+        summary["coordinates"] = geometry["coordinates"]
+    label_property = (
+        layer.style.get("label_property") if isinstance(layer.style, dict) else None
+    )
+    if isinstance(label_property, str) and row["properties"].get(label_property):
+        summary["label"] = str(row["properties"][label_property])
+    elif row["external_id"]:
+        summary["label"] = row["external_id"]
+    return summary
 
 
 def _geometry(geometry: dict[str, Any] | None) -> Any:
     assert geometry is not None
-    from sqlalchemy import func
-
     return func.ST_SetSRID(func.ST_GeomFromGeoJSON(json.dumps(geometry)), 4326)
 
 

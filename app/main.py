@@ -14,6 +14,7 @@ from app.admin import (
     get_admin_import,
     get_admin_layer,
     get_admin_source,
+    import_row_read,
     list_admin_features,
     list_admin_import_rows,
     list_admin_imports,
@@ -21,7 +22,12 @@ from app.admin import (
     list_admin_sources,
 )
 from app.database import get_session, is_ready
-from app.imports import cancel_import, commit_import, stage_import
+from app.imports import (
+    cancel_import,
+    commit_import,
+    resolve_import_row,
+    stage_import,
+)
 from app.layers import (
     get_layer_features_page,
     get_layer_geojson,
@@ -52,6 +58,7 @@ from app.schemas import (
     GeoJSONFeatureCollectionPage,
     ImportCommit,
     ImportCreate,
+    ImportRowResolution,
     ImportSummary,
     LayerCreate,
     LayerSummary,
@@ -111,7 +118,11 @@ TEST_FEATURES = [
     ),
 ]
 
-origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",")]
+origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 app = FastAPI(title="OSIRIS Geo API", version="0.2.0")
 app.add_middleware(
@@ -339,6 +350,20 @@ def admin_list_import_rows(
         session, import_id, limit, cursor, state
     )
     return Page[AdminImportRowRead](items=items, next_cursor=next_cursor)
+
+
+@app.post(
+    "/api/v1/admin/imports/{import_id}/rows/{row_number}/resolution",
+    response_model=AdminImportRowRead,
+    dependencies=[Depends(require_admin)],
+)
+def admin_resolve_import_row(
+    import_id: uuid.UUID,
+    row_number: int,
+    payload: ImportRowResolution,
+    session: Session = Depends(get_session),
+) -> AdminImportRowRead:
+    return import_row_read(resolve_import_row(session, import_id, row_number, payload))
 
 
 @app.get(

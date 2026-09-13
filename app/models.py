@@ -168,8 +168,18 @@ class ImportRow(Base):
     properties: Mapped[dict] = mapped_column(JSONB, default=dict)
     validation_error: Mapped[str | None] = mapped_column(Text)
     candidate_feature_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    candidate_matches: Mapped[list] = mapped_column(JSONB, default=list)
+    resolution: Mapped[str | None] = mapped_column(String(20))
+    resolved_at: Mapped[datetime | None]
 
     import_job: Mapped[ImportJob] = relationship(back_populates="rows")
+
+    __table_args__ = (
+        CheckConstraint(
+            "resolution IS NULL OR resolution IN ('skip', 'import_anyway')",
+            name="import_rows_resolution_check",
+        ),
+    )
 
 
 class ExternalSource(Base):

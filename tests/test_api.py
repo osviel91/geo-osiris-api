@@ -51,6 +51,17 @@ def test_layers_lists_test_layer(monkeypatch) -> None:
     ]
 
 
+def test_cors_default_is_not_wildcard() -> None:
+    from starlette.middleware.cors import CORSMiddleware
+
+    cors = next(
+        middleware
+        for middleware in app.user_middleware
+        if middleware.cls is CORSMiddleware
+    )
+    assert cors.kwargs["allow_origins"] != ["*"]
+
+
 def test_test_layer_is_valid_geojson() -> None:
     response = client.get("/layers/test")
     payload = response.json()

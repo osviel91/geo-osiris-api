@@ -123,7 +123,7 @@ def _import_read(job: ImportJob) -> AdminImportRead:
     )
 
 
-def _import_row_read(row: ImportRow) -> AdminImportRowRead:
+def import_row_read(row: ImportRow) -> AdminImportRowRead:
     return AdminImportRowRead(
         row_number=row.row_number,
         external_id=row.external_id,
@@ -131,6 +131,9 @@ def _import_row_read(row: ImportRow) -> AdminImportRowRead:
         properties=row.properties,
         validation_error=row.validation_error,
         candidate_feature_ids=row.candidate_feature_ids,
+        candidate_matches=row.candidate_matches,
+        resolution=row.resolution,
+        resolved_at=row.resolved_at,
     )
 
 
@@ -300,7 +303,7 @@ def list_admin_import_rows(
     if len(rows) > limit:
         rows = rows[:limit]
         next_cursor = encode_cursor({"row_number": rows[-1].row_number})
-    return [_import_row_read(row) for row in rows], next_cursor
+    return [import_row_read(row) for row in rows], next_cursor
 
 
 def list_admin_sources(

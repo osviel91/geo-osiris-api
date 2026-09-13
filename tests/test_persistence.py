@@ -459,11 +459,18 @@ def test_geojson_staging_validates_and_cancels_without_creating_features(
         ).status_code
         == 200
     )
+    cancelled = client.get(
+        f"/api/v1/admin/imports/{staged.json()['id']}", headers=headers
+    ).json()
+    assert cancelled["status"] == "cancelled"
     assert (
-        client.get(
-            f"/api/v1/admin/imports/{staged.json()['id']}/rows", headers=headers
-        ).json()["items"]
-        == []
+        len(
+            client.get(
+                f"/api/v1/admin/imports/{staged.json()['id']}/rows",
+                headers=headers,
+            ).json()["items"]
+        )
+        == 2
     )
 
 
@@ -481,6 +488,7 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
             "category": "TEST",
             "mode": "managed",
             "geometry_types": ["Point"],
+            "metadata_": {"duplicate_detection": {"identity_properties": ["callsign"]}},
         },
     ).json()
     existing = client.post(

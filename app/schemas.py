@@ -233,6 +233,13 @@ class AdminImportRowRead(BaseModel):
     properties: dict[str, Any]
     validation_error: str | None
     candidate_feature_ids: list[str]
+    candidate_matches: list[dict[str, Any]] = Field(default_factory=list)
+    resolution: str | None
+    resolved_at: datetime | None
+
+
+class ImportRowResolution(BaseModel):
+    resolution: Literal["skip", "import_anyway"]
 
 
 class AdminSourceRead(BaseModel):

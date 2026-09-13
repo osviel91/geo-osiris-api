@@ -75,6 +75,16 @@ def update_feature(
     validate_geometry(payload.geometry, layer.geometry_types)
     validate_properties(payload.properties)
     published_affected = feature.status == "published" or payload.status == "published"
+    changed = [
+        field
+        for field, previous, replacement in (
+            ("external_id", feature.external_id, payload.external_id),
+            ("properties", feature.properties, payload.properties),
+            ("status", feature.status, payload.status),
+            ("verified_at", feature.verified_at, payload.verified_at),
+        )
+        if previous != replacement
+    ]
     feature.external_id = payload.external_id
     feature.geometry = func.ST_SetSRID(
         func.ST_GeomFromGeoJSON(json.dumps(payload.geometry)), 4326
@@ -83,6 +93,16 @@ def update_feature(
     feature.status = payload.status
     feature.verified_at = payload.verified_at
     feature.archived_at = None if payload.status != "archived" else datetime.now(UTC)
+    feature.provenance_records.append(
+        FeatureProvenance(
+            source_type=payload.source_type,
+            source_name=payload.source_name,
+            source_url=payload.source_url,
+            source_record_id=payload.source_record_id,
+            created_by="admin",
+            metadata_={"action": "edit", "changed": changed},
+        )
+    )
     if published_affected:
         touch_layer_data(session, feature.layer_id)
     session.commit()
