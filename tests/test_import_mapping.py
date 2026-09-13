@@ -143,6 +143,10 @@ def test_typed_csv_mapping_converts_primitives_and_is_reproducible() -> None:
     )
     assert committed.status_code == 200, committed.text
     assert committed.json()["mapping_version"] == "2"
+    assert committed.json()["status"] == "committed"
+    assert committed.json()["resolved_candidate_count"] == 0
+    assert committed.json()["unresolved_candidate_count"] == 0
+    assert committed.json()["committed_at"] is not None
     read_committed = client.get(
         f"/api/v1/admin/imports/{staged['id']}", headers=HEADERS
     ).json()

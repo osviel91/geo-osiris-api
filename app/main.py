@@ -38,7 +38,7 @@ from app.managed import (
     archive_feature,
     create_feature,
     create_layer,
-    update_feature,
+    patch_feature,
     update_layer,
 )
 from app.pagination import DEFAULT_LIMIT
@@ -53,6 +53,7 @@ from app.schemas import (
     CompatibilityLayer,
     CompatibilityLayersResponse,
     ExternalSourceSummary,
+    FeaturePatch,
     FeatureWrite,
     GeoJSONFeatureCollection,
     GeoJSONFeatureCollectionPage,
@@ -227,10 +228,10 @@ def admin_create_feature(
 )
 def admin_update_feature(
     feature_id: uuid.UUID,
-    payload: FeatureWrite,
+    payload: FeaturePatch,
     session: Session = Depends(get_session),
 ) -> AdminFeature:
-    feature = update_feature(session, feature_id, payload)
+    feature = patch_feature(session, feature_id, payload)
     return AdminFeature(
         id=str(feature.id), layer_id=str(feature.layer_id), status=feature.status
     )
@@ -393,15 +394,16 @@ def admin_get_source(
 
 @app.post(
     "/api/v1/admin/imports/{import_id}/commit",
-    response_model=ImportSummary,
+    response_model=AdminImportRead,
     dependencies=[Depends(require_admin)],
 )
 def admin_commit_import(
     import_id: uuid.UUID,
     payload: ImportCommit,
     session: Session = Depends(get_session),
-) -> ImportSummary:
-    return commit_import(session, import_id, payload)
+) -> AdminImportRead:
+    commit_import(session, import_id, payload)
+    return get_admin_import(session, import_id)
 
 
 @app.delete(

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from geoalchemy2 import WKTElement
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -550,3 +550,155 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
     assert "/layers/csv-staging" in [
         layer["endpoint"] for layer in client.get("/layers").json()["layers"]
     ]
+
+
+def _managed_layer_with_feature(monkeypatch, headers, status="published"):
+    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    layer = client.post(
+        "/api/v1/admin/layers",
+        headers=headers,
+        json={
+            "slug": f"patch-{uuid.uuid4().hex[:8]}",
+            "name": "Patch layer",
+            "category": "TEST",
+            "mode": "managed",
+            "geometry_types": ["Point"],
+        },
+    ).json()
+    feature = client.post(
+        f"/api/v1/admin/layers/{layer['id']}/features",
+        headers=headers,
+        json={
+            "external_id": "patch-1",
+            "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+            "properties": {"callsign": "PATCH-1", "frequency_mhz": 145.5},
+            "status": status,
+        },
+    ).json()
+    return layer, feature
+
+
+def _provenance_count(feature_id: str) -> int:
+    with Session(engine) as session:
+        return session.scalar(
+            select(func.count())
+            .select_from(FeatureProvenance)
+            .where(FeatureProvenance.feature_id == uuid.UUID(feature_id))
+        )
+
+
+def _stored(feature_id: str) -> tuple[dict, str, object]:
+    with Session(engine) as session:
+        feature = session.get(Feature, uuid.UUID(feature_id))
+        assert feature is not None
+        geometry = session.scalar(select(func.ST_AsText(feature.geometry)))
+        return dict(feature.properties), feature.status, geometry
+
+
+def test_patch_single_property_merges_and_preserves_others(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers)
+
+    response = client.patch(
+        f"/api/v1/admin/features/{feature['id']}",
+        headers=headers,
+        json={"properties": {"frequency_mhz": 145.6}},
+    )
+
+    assert response.status_code == 200
+    properties, status, _ = _stored(feature["id"])
+    assert properties == {"callsign": "PATCH-1", "frequency_mhz": 145.6}
+    assert status == "published"
+
+
+def test_patch_null_removes_property(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers)
+
+    assert (
+        client.patch(
+            f"/api/v1/admin/features/{feature['id']}",
+            headers=headers,
+            json={"properties": {"frequency_mhz": None}},
+        ).status_code
+        == 200
+    )
+    properties, _, _ = _stored(feature["id"])
+    assert properties == {"callsign": "PATCH-1"}
+
+
+def test_patch_omitted_status_and_geometry_are_preserved(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers, status="published")
+    _, _, geometry_before = _stored(feature["id"])
+
+    response = client.patch(
+        f"/api/v1/admin/features/{feature['id']}",
+        headers=headers,
+        json={"properties": {"callsign": "PATCH-1"}},
+    )
+
+    assert response.status_code == 200
+    _, status, geometry_after = _stored(feature["id"])
+    assert status == "published"
+    assert geometry_after == geometry_before
+    assert response.json()["status"] == "published"
+
+
+def test_patch_explicit_status_transition_still_works(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers, status="draft")
+
+    response = client.patch(
+        f"/api/v1/admin/features/{feature['id']}",
+        headers=headers,
+        json={"status": "published"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "published"
+    assert _stored(feature["id"])[1] == "published"
+
+
+def test_patch_appends_one_provenance_and_retains_history(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers)
+    before = _provenance_count(feature["id"])
+
+    client.patch(
+        f"/api/v1/admin/features/{feature['id']}",
+        headers=headers,
+        json={
+            "properties": {"frequency_mhz": 145.6},
+            "source_name": "Phase 5C administrative normalization",
+            "source_record_id": "repe144_N.php:PATCH-1:145.5000",
+        },
+    )
+
+    assert _provenance_count(feature["id"]) == before + 1
+    with Session(engine) as session:
+        edit = session.scalar(
+            select(FeatureProvenance).where(
+                FeatureProvenance.feature_id == uuid.UUID(feature["id"]),
+                FeatureProvenance.metadata_["action"].astext == "edit",
+            )
+        )
+        assert edit is not None
+        assert edit.metadata_["changed"] == ["properties"]
+        assert edit.metadata_["actor"] == "admin"
+        assert edit.source_name == "Phase 5C administrative normalization"
+        assert _provenance_count(feature["id"]) == before + 1
+
+
+def test_patch_invalid_partial_payload_returns_422(monkeypatch) -> None:
+    headers = {"Authorization": "Bearer test-token"}
+    _, feature = _managed_layer_with_feature(monkeypatch, headers)
+
+    assert (
+        client.patch(
+            f"/api/v1/admin/features/{feature['id']}",
+            headers=headers,
+            json={"status": "not-a-status"},
+        ).status_code
+        == 422
+    )

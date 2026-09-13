@@ -112,6 +112,18 @@ class FeatureWrite(BaseModel):
     source_record_id: str | None = Field(default=None, max_length=200)
 
 
+class FeaturePatch(BaseModel):
+    geometry: dict[str, Any] | None = None
+    properties: dict[str, Any] | None = None
+    external_id: str | None = Field(default=None, max_length=200)
+    status: Literal["draft", "published", "stale", "archived"] | None = None
+    verified_at: datetime | None = None
+    source_type: Literal["manual", "import", "agent", "external"] | None = None
+    source_name: str | None = Field(default=None, max_length=200)
+    source_url: str | None = None
+    source_record_id: str | None = Field(default=None, max_length=200)
+
+
 class AdminLayer(BaseModel):
     id: str
     slug: str
