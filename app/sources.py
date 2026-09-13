@@ -86,14 +86,11 @@ def _reconcile(
     for record in records:
         validate_geometry(record.geometry, source.layer.geometry_types)
         validate_properties(record.properties)
-    rows = session.execute(
-        select(
-            Feature,
-            func.ST_AsGeoJSON(Feature.geometry).label("geometry_json"),
-        ).where(Feature.layer_id == source.layer_id)
-    ).all()
     existing = {
-        feature.external_id: (feature, geometry_json) for feature, geometry_json in rows
+        feature.external_id: feature
+        for feature in session.scalars(
+            select(Feature).where(Feature.layer_id == source.layer_id)
+        )
     }
     for external_id, record in incoming.items():
         previous = existing.pop(external_id, None)
@@ -108,9 +105,11 @@ def _reconcile(
             session.add(feature)
             _provenance(feature, source, record)
             continue
-        feature, geometry_json = previous
+        feature = previous
         changed = (
-            json.loads(geometry_json) != record.geometry
+            not session.scalar(
+                select(func.ST_Equals(feature.geometry, _geometry(record.geometry)))
+            )
             or feature.properties != record.properties
             or feature.status != "published"
             or feature.archived_at is not None
@@ -121,7 +120,7 @@ def _reconcile(
             feature.status = "published"
             feature.archived_at = None
             _provenance(feature, source, record)
-    for feature, _ in existing.values():
+    for feature in existing.values():
         if feature.archived_at is None:
             feature.status = "archived"
             feature.archived_at = datetime.now(UTC)

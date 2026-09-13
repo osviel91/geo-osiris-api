@@ -12,6 +12,7 @@ services:
       LOG_LEVEL: INFO
       CORS_ORIGINS: "*"
       DATABASE_URL: postgresql+psycopg://osiris:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgis:5432/osiris
+      AEMET_API_KEY: ${AEMET_API_KEY:-}
     depends_on:
       postgis:
         condition: service_healthy

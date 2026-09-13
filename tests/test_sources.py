@@ -121,3 +121,123 @@ def test_external_source_sync_is_idempotent_and_preserves_last_good_data(
         )
     finally:
         ADAPTERS.pop("fixture", None)
+
+
+def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(
+    monkeypatch,
+) -> None:
+    import app.aemet as aemet
+
+    station = {
+        "indicativo": "3195",
+        "nombre": "ZARAGOZA",
+        "provincia": "ZARAGOZA",
+        "altitud": "263",
+        "latitud": "412842N",
+        "longitud": "0013733W",
+        "fnac": "1940-01-01",
+        "fint": "2024-03-01T12:00:00Z",
+    }
+    records = [station]
+
+    def request_json(url: str):
+        if "inventarioestaciones" in url:
+            assert "api_key=offline-key" in url
+            return {"datos": "https://offline.fixture/aemet-stations"}
+        return records
+
+    monkeypatch.setenv("AEMET_API_KEY", "offline-key")
+    monkeypatch.setattr(aemet, "_request_json", request_json)
+    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    with Session(engine) as session:
+        layer = Layer(
+            slug="aemet-fixture",
+            name="AEMET fixture",
+            category="WEATHER_INFRASTRUCTURE",
+            mode="external",
+            geometry_types=["Point"],
+            style={},
+            metadata_={},
+        )
+        source = ExternalSource(
+            layer=layer,
+            slug="aemet-fixture",
+            adapter="aemet_stations",
+            dataset_id="aemet-opendata-station-inventory",
+            endpoint=aemet.DEFAULT_ENDPOINT,
+            status="never",
+        )
+        session.add(source)
+        session.commit()
+        source_id, layer_id = source.id, layer.id
+
+    headers = {"Authorization": "Bearer test-token"}
+    endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+    first = client.post(endpoint, headers=headers)
+    assert first.json()["status"] == "success"
+    assert first.json()["last_success_at"] is not None
+    public = client.get("/api/v1/layers/aemet-fixture").json()
+    assert public["features"][0]["properties"]["station_type"] == (
+        "weather_observation_station"
+    )
+    assert public["features"][0]["geometry"]["coordinates"] == pytest.approx(
+        [-1.6258333333333332, 41.47833333333333]
+    )
+
+    assert client.post(endpoint, headers=headers).json()["status"] == "success"
+    with Session(engine) as session:
+        feature = session.scalar(select(Feature).where(Feature.layer_id == layer_id))
+        assert feature is not None
+        assert len(feature.provenance_records) == 1
+        provenance = feature.provenance_records[0]
+        assert provenance.source_record_id == "3195"
+        assert provenance.observed_at is not None
+        assert provenance.imported_at is not None
+        assert provenance.metadata_["dataset_id"] == "aemet-opendata-station-inventory"
+        assert (
+            provenance.metadata_["source_timestamps"]["fint"] == "2024-03-01T12:00:00Z"
+        )
+
+    records = [{**station, "nombre": "ZARAGOZA UPDATED", "longitud": "0014000W"}]
+    changed = client.post(endpoint, headers=headers)
+    assert changed.json()["status"] == "success"
+    assert (
+        client.get("/api/v1/layers/aemet-fixture").json()["features"][0]["properties"][
+            "name"
+        ]
+        == "ZARAGOZA UPDATED"
+    )
+    with Session(engine) as session:
+        feature = session.scalar(select(Feature).where(Feature.layer_id == layer_id))
+        assert feature is not None
+        assert len(feature.provenance_records) == 2
+
+    records = []
+    assert client.post(endpoint, headers=headers).json()["status"] == "success"
+    assert client.get("/api/v1/layers/aemet-fixture").json()["features"] == []
+
+    records = [station]
+    assert client.post(endpoint, headers=headers).json()["status"] == "success"
+    records = [{"indicativo": "3195", "nombre": "Malformed"}]
+    malformed = client.post(endpoint, headers=headers).json()
+    assert malformed["status"] == "failed"
+    assert (
+        client.get("/api/v1/layers/aemet-fixture").json()["features"][0]["properties"][
+            "name"
+        ]
+        == "ZARAGOZA"
+    )
+
+    def timeout(_: str):
+        raise TimeoutError("offline timeout")
+
+    monkeypatch.setattr(aemet, "_request_json", timeout)
+    timed_out = client.post(endpoint, headers=headers).json()
+    assert timed_out["status"] == "failed"
+    assert "offline timeout" in timed_out["last_error"]
+    assert (
+        client.get("/api/v1/layers/aemet-fixture").json()["features"][0]["properties"][
+            "name"
+        ]
+        == "ZARAGOZA"
+    )

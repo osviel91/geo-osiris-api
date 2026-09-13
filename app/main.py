@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+import app.aemet  # noqa: F401
 from app.database import get_session, is_ready
 from app.imports import cancel_import, commit_import, get_import, stage_import
 from app.layers import get_layer_geojson, list_compatibility_layers, list_layers
