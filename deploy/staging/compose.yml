@@ -1,0 +1,75 @@
+name: osiris-staging
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: osiris
+      POSTGRES_USER: osiris
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgis-staging-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osiris -d osiris"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - osiris-staging
+
+  geo-api:
+    image: ${GEO_API_IMAGE:-geo-osiris-api:sha-0ef6d4a}
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
+      AEMET_API_KEY: ${AEMET_API_KEY:-}
+      DATABASE_URL: postgresql+psycopg://osiris:${POSTGRES_PASSWORD:?}@postgis:5432/osiris
+    depends_on:
+      postgis:
+        condition: service_healthy
+    networks:
+      - osiris-staging
+
+  geo-admin:
+    image: ${GEO_ADMIN_IMAGE:-geo-osiris-admin:sha-0926b36}
+    restart: unless-stopped
+    environment:
+      GEO_API_URL: http://geo-api:8000
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
+      ADMIN_UI_PASSWORD: ${ADMIN_UI_PASSWORD:?ADMIN_UI_PASSWORD is required}
+    ports:
+      - "${ADMIN_PORT:-8081}:3000"
+    depends_on:
+      - geo-api
+    networks:
+      - osiris-staging
+
+  osiris:
+    image: ${OSIRIS_IMAGE:-osiris:sha-a353dce}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      GEO_API_ENABLED: "true"
+      GEO_API_URL: http://geo-api:8000
+    ports:
+      - "${OSIRIS_PORT:-3000}:3000"
+    depends_on:
+      - geo-api
+    networks:
+      - osiris-staging
+
+volumes:
+  postgis-staging-data:
+
+networks:
+  osiris-staging:
+    driver: bridge
