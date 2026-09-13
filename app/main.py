@@ -22,6 +22,7 @@ from app.schemas import (
     AdminLayer,
     CompatibilityLayer,
     CompatibilityLayersResponse,
+    ExternalSourceSummary,
     FeatureWrite,
     GeoJSONFeatureCollection,
     ImportCommit,
@@ -36,6 +37,7 @@ from app.schemas import (
     StaticFeatureProperties,
 )
 from app.security import require_admin
+from app.sources import sync_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -244,6 +246,28 @@ def admin_cancel_import(
     import_id: uuid.UUID, session: Session = Depends(get_session)
 ) -> None:
     cancel_import(session, import_id)
+
+
+@app.post(
+    "/api/v1/admin/sources/{source_id}/sync",
+    response_model=ExternalSourceSummary,
+    dependencies=[Depends(require_admin)],
+)
+def admin_sync_source(
+    source_id: uuid.UUID, session: Session = Depends(get_session)
+) -> ExternalSourceSummary:
+    source = sync_source(session, source_id)
+    return ExternalSourceSummary(
+        id=str(source.id),
+        layer_id=str(source.layer_id),
+        slug=source.slug,
+        adapter=source.adapter,
+        dataset_id=source.dataset_id,
+        status=source.status,
+        last_attempt_at=source.last_attempt_at,
+        last_success_at=source.last_success_at,
+        last_error=source.last_error,
+    )
 
 
 @app.get("/layers", response_model=CompatibilityLayersResponse)

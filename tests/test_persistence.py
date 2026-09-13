@@ -27,7 +27,7 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, feature_provenance, "
+                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -35,7 +35,7 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, feature_provenance, "
+                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
                 "features, layers CASCADE"
             )
         )

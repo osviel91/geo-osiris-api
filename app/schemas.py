@@ -138,3 +138,15 @@ class ImportSummary(BaseModel):
     invalid_count: int
     candidate_count: int
     rows: list[ImportRowSummary]
+
+
+class ExternalSourceSummary(BaseModel):
+    id: str
+    layer_id: str
+    slug: str
+    adapter: str
+    dataset_id: str
+    status: str
+    last_attempt_at: datetime | None
+    last_success_at: datetime | None
+    last_error: str | None

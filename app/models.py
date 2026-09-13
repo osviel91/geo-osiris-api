@@ -41,6 +41,9 @@ class Layer(Base):
 
     features: Mapped[list["Feature"]] = relationship(back_populates="layer")
     imports: Mapped[list["ImportJob"]] = relationship(back_populates="layer")
+    external_sources: Mapped[list["ExternalSource"]] = relationship(
+        back_populates="layer"
+    )
 
     __table_args__ = (
         CheckConstraint("mode IN ('managed', 'external')", name="layers_mode_check"),
@@ -161,3 +164,32 @@ class ImportRow(Base):
     candidate_feature_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
 
     import_job: Mapped[ImportJob] = relationship(back_populates="rows")
+
+
+class ExternalSource(Base):
+    __tablename__ = "external_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    layer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("layers.id"), unique=True, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    adapter: Mapped[str] = mapped_column(String(100))
+    dataset_id: Mapped[str] = mapped_column(String(200))
+    endpoint: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    status: Mapped[str] = mapped_column(String(20), default="never")
+    last_attempt_at: Mapped[datetime | None]
+    last_success_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    layer: Mapped[Layer] = relationship(back_populates="external_sources")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('never', 'success', 'failed')",
+            name="external_sources_status_check",
+        ),
+    )
