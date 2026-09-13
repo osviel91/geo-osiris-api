@@ -135,6 +135,8 @@ class ImportJob(Base):
     csv_mapping: Mapped[dict] = mapped_column(JSONB, default=dict)
     csv_headers: Mapped[list[str]] = mapped_column(JSONB, default=list)
     mapping_version: Mapped[str] = mapped_column(String(20), default="1")
+    source_name: Mapped[str | None] = mapped_column(String(200))
+    source_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     committed_at: Mapped[datetime | None]
     cancelled_at: Mapped[datetime | None]

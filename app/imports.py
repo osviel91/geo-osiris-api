@@ -45,6 +45,8 @@ def stage_import(session: Session, payload: ImportCreate) -> ImportSummary:
         csv_mapping=mapping,
         csv_headers=headers,
         mapping_version=MAPPING_VERSION,
+        source_name=payload.source_name,
+        source_url=payload.source_url,
     )
     session.add(job)
     for row_number, record in enumerate(records, start=1):
@@ -92,7 +94,8 @@ def commit_import(
         feature.provenance_records.append(
             FeatureProvenance(
                 source_type="import",
-                source_name=job.filename,
+                source_name=job.source_name or job.filename,
+                source_url=job.source_url,
                 source_record_id=row.external_id,
                 import_id=job.id,
                 created_by="admin",
@@ -488,4 +491,6 @@ def _summary(job: ImportJob) -> ImportSummary:
         csv_mapping=job.csv_mapping,
         csv_headers=job.csv_headers,
         mapping_version=job.mapping_version,
+        source_name=job.source_name,
+        source_url=job.source_url,
     )

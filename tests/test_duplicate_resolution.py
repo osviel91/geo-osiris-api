@@ -71,7 +71,7 @@ def create_feature(
     return response.json()
 
 
-def stage(layer_id: str, content: str, mapping: dict | None = None) -> dict:
+def stage(layer_id: str, content: str, mapping: dict | None = None, **extra) -> dict:
     payload = {
         "layer_id": layer_id,
         "filename": "duplicates.csv",
@@ -80,6 +80,7 @@ def stage(layer_id: str, content: str, mapping: dict | None = None) -> dict:
     }
     if mapping is not None:
         payload["csv_mapping"] = mapping
+    payload.update(extra)
     response = client.post("/api/v1/admin/imports", headers=HEADERS, json=payload)
     assert response.status_code == 200, response.text
     return response.json()
@@ -88,6 +89,22 @@ def stage(layer_id: str, content: str, mapping: dict | None = None) -> dict:
 def rows(import_id: str) -> list[dict]:
     response = client.get(f"/api/v1/admin/imports/{import_id}/rows", headers=HEADERS)
     return response.json()["items"]
+
+
+def import_detail(import_id: str) -> dict:
+    response = client.get(f"/api/v1/admin/imports/{import_id}", headers=HEADERS)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def resolve(import_id: str, row_number: int, resolution: str) -> dict:
+    response = client.post(
+        f"/api/v1/admin/imports/{import_id}/rows/{row_number}/resolution",
+        headers=HEADERS,
+        json={"resolution": resolution},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_candidate_matches_expose_generic_reasons() -> None:
@@ -257,3 +274,150 @@ def test_feature_edit_appends_provenance() -> None:
     edit = detail["provenance"][1]
     assert edit["metadata_"]["action"] == "edit"
     assert "properties" in edit["metadata_"]["changed"]
+
+
+def test_import_resolution_aggregates_track_candidate_state() -> None:
+    layer = create_layer(
+        "dup-aggregate", duplicate_detection={"identity_properties": ["callsign"]}
+    )
+    create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "A"})
+    create_feature(layer["id"], -3.8, 40.5, properties={"callsign": "B"})
+
+    clean = stage(layer["id"], "longitude,latitude,callsign\n-1.0,40.0,UNIQUE\n")
+    detail = import_detail(clean["id"])
+    assert detail["candidate_count"] == 0
+    assert detail["resolved_candidate_count"] == 0
+    assert detail["unresolved_candidate_count"] == 0
+
+    staged = stage(
+        layer["id"], "longitude,latitude,callsign\n-3.7,40.4,A\n-3.8,40.5,B\n"
+    )
+    detail = import_detail(staged["id"])
+    assert detail["candidate_count"] == 2
+    assert detail["resolved_candidate_count"] == 0
+    assert detail["unresolved_candidate_count"] == 2
+
+    resolve(staged["id"], 1, "skip")
+    detail = import_detail(staged["id"])
+    assert detail["candidate_count"] == 2
+    assert detail["resolved_candidate_count"] == 1
+    assert detail["unresolved_candidate_count"] == 1
+
+    resolve(staged["id"], 2, "skip")
+    detail = import_detail(staged["id"])
+    assert detail["resolved_candidate_count"] == 2
+    assert detail["unresolved_candidate_count"] == 0
+
+
+def test_skip_and_import_anyway_both_count_as_resolved() -> None:
+    layer = create_layer(
+        "dup-both-resolved", duplicate_detection={"identity_properties": ["callsign"]}
+    )
+    create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "A"})
+    create_feature(layer["id"], -3.8, 40.5, properties={"callsign": "B"})
+    staged = stage(
+        layer["id"], "longitude,latitude,callsign\n-3.7,40.4,A\n-3.8,40.5,B\n"
+    )
+    resolve(staged["id"], 1, "skip")
+    resolve(staged["id"], 2, "import_anyway")
+    detail = import_detail(staged["id"])
+    assert detail["resolved_candidate_count"] == 2
+    assert detail["unresolved_candidate_count"] == 0
+
+
+def test_cancelled_import_retains_resolution_state() -> None:
+    layer = create_layer(
+        "dup-cancel-resolved", duplicate_detection={"identity_properties": ["callsign"]}
+    )
+    create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "A"})
+    create_feature(layer["id"], -3.8, 40.5, properties={"callsign": "B"})
+    staged = stage(
+        layer["id"], "longitude,latitude,callsign\n-3.7,40.4,A\n-3.8,40.5,B\n"
+    )
+    resolve(staged["id"], 1, "skip")
+    resolve(staged["id"], 2, "import_anyway")
+    assert (
+        client.delete(
+            f"/api/v1/admin/imports/{staged['id']}", headers=HEADERS
+        ).status_code
+        == 200
+    )
+    detail = import_detail(staged["id"])
+    assert detail["status"] == "cancelled"
+    assert detail["resolved_candidate_count"] == 2
+    assert detail["unresolved_candidate_count"] == 0
+    stored = rows(staged["id"])
+    assert [row["resolution"] for row in stored] == ["skip", "import_anyway"]
+
+
+def test_commit_rejects_unresolved_candidates_independently() -> None:
+    layer = create_layer(
+        "dup-independent", duplicate_detection={"identity_properties": ["callsign"]}
+    )
+    create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "A"})
+    staged = stage(layer["id"], "longitude,latitude,callsign\n-3.7,40.4,A\n")
+    detail = import_detail(staged["id"])
+    assert detail["invalid_count"] == 0
+    assert detail["unresolved_candidate_count"] == 1
+    blocked = client.post(
+        f"/api/v1/admin/imports/{staged['id']}/commit",
+        headers=HEADERS,
+        json={"status": "published"},
+    )
+    assert blocked.status_code == 409
+    assert "duplicate" in blocked.json()["detail"].lower()
+
+
+def test_import_provenance_source_round_trip() -> None:
+    layer = create_layer("import-provenance")
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,callsign\n-3.7,40.4,EA1\n",
+        source_name="URE Madrid repeater directory",
+        source_url="https://example.test/ure",
+    )
+    detail = import_detail(staged["id"])
+    assert detail["source_name"] == "URE Madrid repeater directory"
+    assert detail["source_url"] == "https://example.test/ure"
+
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{staged['id']}/commit",
+            headers=HEADERS,
+            json={"status": "published"},
+        ).status_code
+        == 200
+    )
+    features = client.get(
+        f"/api/v1/admin/layers/{layer['id']}/features", headers=HEADERS
+    ).json()["items"]
+    provenance = client.get(
+        f"/api/v1/admin/features/{features[0]['id']}", headers=HEADERS
+    ).json()["provenance"]
+    assert provenance[0]["source_name"] == "URE Madrid repeater directory"
+    assert provenance[0]["source_url"] == "https://example.test/ure"
+    assert provenance[0]["import_id"] == staged["id"]
+
+
+def test_import_provenance_falls_back_to_filename() -> None:
+    layer = create_layer("import-provenance-fallback")
+    staged = stage(layer["id"], "longitude,latitude,callsign\n-3.7,40.4,EA1\n")
+    detail = import_detail(staged["id"])
+    assert detail["source_name"] is None
+    assert detail["source_url"] is None
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{staged['id']}/commit",
+            headers=HEADERS,
+            json={"status": "published"},
+        ).status_code
+        == 200
+    )
+    features = client.get(
+        f"/api/v1/admin/layers/{layer['id']}/features", headers=HEADERS
+    ).json()["items"]
+    provenance = client.get(
+        f"/api/v1/admin/features/{features[0]['id']}", headers=HEADERS
+    ).json()["provenance"]
+    assert provenance[0]["source_name"] == "duplicates.csv"
+    assert provenance[0]["source_url"] is None

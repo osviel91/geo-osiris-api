@@ -131,6 +131,8 @@ class ImportCreate(BaseModel):
     format: Literal["geojson", "csv"]
     content: str = Field(max_length=5_000_000)
     csv_mapping: dict[str, Any] = Field(default_factory=dict)
+    source_name: str | None = Field(default=None, max_length=200)
+    source_url: str | None = None
 
 
 class ImportCommit(BaseModel):
@@ -150,6 +152,8 @@ class ImportSummary(BaseModel):
     csv_mapping: dict[str, Any]
     csv_headers: list[str]
     mapping_version: str
+    source_name: str | None
+    source_url: str | None
 
 
 class ExternalSourceSummary(BaseModel):
@@ -221,6 +225,10 @@ class AdminImportRead(BaseModel):
     valid_count: int
     invalid_count: int
     candidate_count: int
+    resolved_candidate_count: int
+    unresolved_candidate_count: int
+    source_name: str | None
+    source_url: str | None
     created_at: datetime
     committed_at: datetime | None
     cancelled_at: datetime | None

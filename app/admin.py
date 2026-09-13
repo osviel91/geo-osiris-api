@@ -106,7 +106,9 @@ def _feature_read(
     )
 
 
-def _import_read(job: ImportJob) -> AdminImportRead:
+def _import_read(
+    job: ImportJob, resolved: int = 0, unresolved: int = 0
+) -> AdminImportRead:
     return AdminImportRead(
         id=str(job.id),
         layer_id=str(job.layer_id),
@@ -117,10 +119,39 @@ def _import_read(job: ImportJob) -> AdminImportRead:
         valid_count=max(job.row_count - job.invalid_count, 0),
         invalid_count=job.invalid_count,
         candidate_count=job.candidate_count,
+        resolved_candidate_count=resolved,
+        unresolved_candidate_count=unresolved,
+        source_name=job.source_name,
+        source_url=job.source_url,
         created_at=job.created_at,
         committed_at=job.committed_at,
         cancelled_at=job.cancelled_at,
     )
+
+
+def _resolution_counts(
+    session: Session, import_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[int, int]]:
+    if not import_ids:
+        return {}
+    candidate = func.jsonb_array_length(ImportRow.candidate_feature_ids) > 0
+    statement = (
+        select(
+            ImportRow.import_id,
+            func.count()
+            .filter(candidate, ImportRow.resolution.is_not(None))
+            .label("resolved"),
+            func.count()
+            .filter(candidate, ImportRow.resolution.is_(None))
+            .label("unresolved"),
+        )
+        .where(ImportRow.import_id.in_(import_ids))
+        .group_by(ImportRow.import_id)
+    )
+    return {
+        row.import_id: (row.resolved, row.unresolved)
+        for row in session.execute(statement)
+    }
 
 
 def import_row_read(row: ImportRow) -> AdminImportRowRead:
@@ -253,14 +284,18 @@ def list_admin_imports(
         next_cursor = encode_cursor(
             {"created_at": last.created_at.isoformat(), "id": str(last.id)}
         )
-    return [_import_read(job) for job in rows], next_cursor
+    counts = _resolution_counts(session, [job.id for job in rows])
+    return [_import_read(job, *counts.get(job.id, (0, 0))) for job in rows], next_cursor
 
 
 def get_admin_import(session: Session, import_id: uuid.UUID) -> AdminImportRead:
     job = session.get(ImportJob, import_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Import not found")
-    return _import_read(job)
+    resolved, unresolved = _resolution_counts(session, [import_id]).get(
+        import_id, (0, 0)
+    )
+    return _import_read(job, resolved, unresolved)
 
 
 def list_admin_import_rows(
