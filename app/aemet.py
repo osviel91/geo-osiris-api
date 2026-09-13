@@ -70,7 +70,12 @@ def _with_api_key(url: str, api_key: str) -> str:
 def _request_json(url: str) -> Any:
     request = Request(url, headers={"Accept": "application/json"})
     with urlopen(request, timeout=20) as response:  # noqa: S310
-        return json.load(response)
+        payload = response.read()
+        charset = response.headers.get_content_charset() or "utf-8"
+        try:
+            return json.loads(payload.decode(charset))
+        except UnicodeDecodeError:
+            return json.loads(payload.decode("latin-1"))
 
 
 def _required(record: dict[str, Any], field: str) -> str:

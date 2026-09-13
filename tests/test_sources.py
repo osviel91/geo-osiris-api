@@ -1,4 +1,6 @@
 import os
+from email.message import Message
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +18,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 client = TestClient(app)
+
+
+def test_aemet_json_accepts_latin1_without_a_charset(monkeypatch) -> None:
+    import app.aemet as aemet
+
+    class Response(BytesIO):
+        headers = Message()
+
+    monkeypatch.setattr(
+        aemet,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(b'{"nombre":"ALICANTE \xd3"}'),
+    )
+
+    assert aemet._request_json("https://offline.fixture") == {"nombre": "ALICANTE Ó"}
 
 
 @pytest.fixture(autouse=True)
