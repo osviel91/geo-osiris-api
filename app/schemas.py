@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CompatibilityLayer(BaseModel):
@@ -61,3 +61,49 @@ class GeoJSONFeature(BaseModel):
 class GeoJSONFeatureCollection(BaseModel):
     type: Literal["FeatureCollection"] = "FeatureCollection"
     features: list[GeoJSONFeature]
+
+
+class LayerCreate(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,99}$")
+    name: str = Field(max_length=200)
+    description: str | None = None
+    category: str = Field(max_length=50)
+    mode: Literal["managed", "external"]
+    geometry_types: list[str] = Field(min_length=1)
+    enabled: bool = True
+    style: dict[str, Any] = Field(default_factory=dict)
+    metadata_: dict[str, Any] = Field(default_factory=dict)
+
+
+class LayerUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str | None = None
+    category: str | None = Field(default=None, max_length=50)
+    enabled: bool | None = None
+    style: dict[str, Any] | None = None
+    metadata_: dict[str, Any] | None = None
+
+
+class FeatureWrite(BaseModel):
+    geometry: dict[str, Any]
+    properties: dict[str, Any] = Field(default_factory=dict)
+    external_id: str | None = Field(default=None, max_length=200)
+    status: Literal["draft", "published", "stale", "archived"] = "draft"
+    verified_at: datetime | None = None
+    source_type: Literal["manual", "import", "agent", "external"] = "manual"
+    source_name: str | None = Field(default=None, max_length=200)
+    source_url: str | None = None
+    source_record_id: str | None = Field(default=None, max_length=200)
+
+
+class AdminLayer(BaseModel):
+    id: str
+    slug: str
+    name: str
+    mode: str
+
+
+class AdminFeature(BaseModel):
+    id: str
+    layer_id: str
+    status: str

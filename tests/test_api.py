@@ -25,12 +25,17 @@ def test_ready_checks_database(monkeypatch) -> None:
 def test_ready_returns_service_unavailable_for_database_failure(monkeypatch) -> None:
     monkeypatch.setattr("app.main.is_ready", lambda: False)
 
-    response = client.get("/ready")
+    health = client.get("/health")
+    ready = client.get("/ready")
 
-    assert response.status_code == 503
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    assert ready.status_code == 503
 
 
-def test_layers_lists_test_layer() -> None:
+def test_layers_lists_test_layer(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.list_compatibility_layers", lambda session: [])
+
     response = client.get("/layers")
 
     assert response.status_code == 200

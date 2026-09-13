@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,16 +9,29 @@ from sqlalchemy.orm import Session
 
 from app.database import get_session, is_ready
 from app.layers import get_layer_geojson, list_compatibility_layers, list_layers
+from app.managed import (
+    archive_feature,
+    create_feature,
+    create_layer,
+    update_feature,
+    update_layer,
+)
 from app.schemas import (
+    AdminFeature,
+    AdminLayer,
     CompatibilityLayer,
     CompatibilityLayersResponse,
+    FeatureWrite,
     GeoJSONFeatureCollection,
+    LayerCreate,
     LayerSummary,
+    LayerUpdate,
     PointGeometry,
     StaticFeature,
     StaticFeatureCollection,
     StaticFeatureProperties,
 )
+from app.security import require_admin
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -72,7 +86,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=[],
 )
 
@@ -114,6 +128,73 @@ def public_layer_features(
     slug: str, session: Session = Depends(get_session)
 ) -> GeoJSONFeatureCollection:
     return public_layer(slug, session)
+
+
+@app.post(
+    "/api/v1/admin/layers",
+    response_model=AdminLayer,
+    dependencies=[Depends(require_admin)],
+)
+def admin_create_layer(
+    payload: LayerCreate, session: Session = Depends(get_session)
+) -> AdminLayer:
+    layer = create_layer(session, payload)
+    return AdminLayer(
+        id=str(layer.id), slug=layer.slug, name=layer.name, mode=layer.mode
+    )
+
+
+@app.patch(
+    "/api/v1/admin/layers/{layer_id}",
+    response_model=AdminLayer,
+    dependencies=[Depends(require_admin)],
+)
+def admin_update_layer(
+    layer_id: uuid.UUID, payload: LayerUpdate, session: Session = Depends(get_session)
+) -> AdminLayer:
+    layer = update_layer(session, layer_id, payload)
+    return AdminLayer(
+        id=str(layer.id), slug=layer.slug, name=layer.name, mode=layer.mode
+    )
+
+
+@app.post(
+    "/api/v1/admin/layers/{layer_id}/features",
+    response_model=AdminFeature,
+    dependencies=[Depends(require_admin)],
+)
+def admin_create_feature(
+    layer_id: uuid.UUID, payload: FeatureWrite, session: Session = Depends(get_session)
+) -> AdminFeature:
+    feature = create_feature(session, layer_id, payload)
+    return AdminFeature(
+        id=str(feature.id), layer_id=str(feature.layer_id), status=feature.status
+    )
+
+
+@app.patch(
+    "/api/v1/admin/features/{feature_id}",
+    response_model=AdminFeature,
+    dependencies=[Depends(require_admin)],
+)
+def admin_update_feature(
+    feature_id: uuid.UUID,
+    payload: FeatureWrite,
+    session: Session = Depends(get_session),
+) -> AdminFeature:
+    feature = update_feature(session, feature_id, payload)
+    return AdminFeature(
+        id=str(feature.id), layer_id=str(feature.layer_id), status=feature.status
+    )
+
+
+@app.delete(
+    "/api/v1/admin/features/{feature_id}", dependencies=[Depends(require_admin)]
+)
+def admin_archive_feature(
+    feature_id: uuid.UUID, session: Session = Depends(get_session)
+) -> None:
+    archive_feature(session, feature_id)
 
 
 @app.get("/layers", response_model=CompatibilityLayersResponse)
