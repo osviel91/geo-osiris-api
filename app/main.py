@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,9 +9,25 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import app.aemet  # noqa: F401
+from app.admin import (
+    get_admin_feature,
+    get_admin_import,
+    get_admin_layer,
+    get_admin_source,
+    list_admin_features,
+    list_admin_import_rows,
+    list_admin_imports,
+    list_admin_layers,
+    list_admin_sources,
+)
 from app.database import get_session, is_ready
-from app.imports import cancel_import, commit_import, get_import, stage_import
-from app.layers import get_layer_geojson, list_compatibility_layers, list_layers
+from app.imports import cancel_import, commit_import, stage_import
+from app.layers import (
+    get_layer_features_page,
+    get_layer_geojson,
+    list_compatibility_layers,
+    list_layers,
+)
 from app.managed import (
     archive_feature,
     create_feature,
@@ -18,20 +35,28 @@ from app.managed import (
     update_feature,
     update_layer,
 )
+from app.pagination import DEFAULT_LIMIT
 from app.schemas import (
     AdminFeature,
+    AdminFeatureRead,
+    AdminImportRead,
+    AdminImportRowRead,
     AdminLayer,
+    AdminLayerRead,
+    AdminSourceRead,
     CompatibilityLayer,
     CompatibilityLayersResponse,
     ExternalSourceSummary,
     FeatureWrite,
     GeoJSONFeatureCollection,
+    GeoJSONFeatureCollectionPage,
     ImportCommit,
     ImportCreate,
     ImportSummary,
     LayerCreate,
     LayerSummary,
     LayerUpdate,
+    Page,
     PointGeometry,
     StaticFeature,
     StaticFeatureCollection,
@@ -130,11 +155,16 @@ def public_layer(
         raise HTTPException(status_code=503, detail="Database unavailable") from error
 
 
-@app.get("/api/v1/layers/{slug}/features", response_model=GeoJSONFeatureCollection)
+@app.get("/api/v1/layers/{slug}/features", response_model=GeoJSONFeatureCollectionPage)
 def public_layer_features(
-    slug: str, session: Session = Depends(get_session)
-) -> GeoJSONFeatureCollection:
-    return public_layer(slug, session)
+    slug: str,
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    bbox: str | None = None,
+    updated_since: datetime | None = None,
+    session: Session = Depends(get_session),
+) -> GeoJSONFeatureCollectionPage:
+    return get_layer_features_page(session, slug, limit, cursor, bbox, updated_since)
 
 
 @app.post(
@@ -216,14 +246,124 @@ def admin_stage_import(
 
 
 @app.get(
+    "/api/v1/admin/layers",
+    response_model=Page[AdminLayerRead],
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_layers(
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    session: Session = Depends(get_session),
+) -> Page[AdminLayerRead]:
+    items, next_cursor = list_admin_layers(session, limit, cursor)
+    return Page[AdminLayerRead](items=items, next_cursor=next_cursor)
+
+
+@app.get(
+    "/api/v1/admin/layers/{layer_id}",
+    response_model=AdminLayerRead,
+    dependencies=[Depends(require_admin)],
+)
+def admin_get_layer(
+    layer_id: uuid.UUID, session: Session = Depends(get_session)
+) -> AdminLayerRead:
+    return get_admin_layer(session, layer_id)
+
+
+@app.get(
+    "/api/v1/admin/layers/{layer_id}/features",
+    response_model=Page[AdminFeatureRead],
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_features(
+    layer_id: uuid.UUID,
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    status: str | None = None,
+    session: Session = Depends(get_session),
+) -> Page[AdminFeatureRead]:
+    items, next_cursor = list_admin_features(session, layer_id, limit, cursor, status)
+    return Page[AdminFeatureRead](items=items, next_cursor=next_cursor)
+
+
+@app.get(
+    "/api/v1/admin/features/{feature_id}",
+    response_model=AdminFeatureRead,
+    dependencies=[Depends(require_admin)],
+)
+def admin_get_feature(
+    feature_id: uuid.UUID, session: Session = Depends(get_session)
+) -> AdminFeatureRead:
+    return get_admin_feature(session, feature_id)
+
+
+@app.get(
+    "/api/v1/admin/imports",
+    response_model=Page[AdminImportRead],
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_imports(
+    layer_id: uuid.UUID | None = None,
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    session: Session = Depends(get_session),
+) -> Page[AdminImportRead]:
+    items, next_cursor = list_admin_imports(session, layer_id, limit, cursor)
+    return Page[AdminImportRead](items=items, next_cursor=next_cursor)
+
+
+@app.get(
     "/api/v1/admin/imports/{import_id}",
-    response_model=ImportSummary,
+    response_model=AdminImportRead,
     dependencies=[Depends(require_admin)],
 )
 def admin_get_import(
     import_id: uuid.UUID, session: Session = Depends(get_session)
-) -> ImportSummary:
-    return get_import(session, import_id)
+) -> AdminImportRead:
+    return get_admin_import(session, import_id)
+
+
+@app.get(
+    "/api/v1/admin/imports/{import_id}/rows",
+    response_model=Page[AdminImportRowRead],
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_import_rows(
+    import_id: uuid.UUID,
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    state: str | None = None,
+    session: Session = Depends(get_session),
+) -> Page[AdminImportRowRead]:
+    items, next_cursor = list_admin_import_rows(
+        session, import_id, limit, cursor, state
+    )
+    return Page[AdminImportRowRead](items=items, next_cursor=next_cursor)
+
+
+@app.get(
+    "/api/v1/admin/sources",
+    response_model=Page[AdminSourceRead],
+    dependencies=[Depends(require_admin)],
+)
+def admin_list_sources(
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    session: Session = Depends(get_session),
+) -> Page[AdminSourceRead]:
+    items, next_cursor = list_admin_sources(session, limit, cursor)
+    return Page[AdminSourceRead](items=items, next_cursor=next_cursor)
+
+
+@app.get(
+    "/api/v1/admin/sources/{source_id}",
+    response_model=AdminSourceRead,
+    dependencies=[Depends(require_admin)],
+)
+def admin_get_source(
+    source_id: uuid.UUID, session: Session = Depends(get_session)
+) -> AdminSourceRead:
+    return get_admin_source(session, source_id)
 
 
 @app.post(

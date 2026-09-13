@@ -1,8 +1,15 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
+
+
+class Page(BaseModel, Generic[T]):
+    items: list[T]
+    next_cursor: str | None = None
 
 
 class CompatibilityLayer(BaseModel):
@@ -66,6 +73,10 @@ class GeoJSONFeature(BaseModel):
 class GeoJSONFeatureCollection(BaseModel):
     type: Literal["FeatureCollection"] = "FeatureCollection"
     features: list[GeoJSONFeature]
+
+
+class GeoJSONFeatureCollectionPage(GeoJSONFeatureCollection):
+    next_cursor: str | None = None
 
 
 class LayerCreate(BaseModel):
@@ -150,6 +161,91 @@ class ExternalSourceSummary(BaseModel):
     slug: str
     adapter: str
     dataset_id: str
+    status: str
+    last_attempt_at: datetime | None
+    last_success_at: datetime | None
+    last_error: str | None
+
+
+class AdminLayerRead(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: str | None
+    category: str
+    mode: str
+    geometry_types: list[str]
+    enabled: bool
+    style: dict[str, Any]
+    metadata_: dict[str, Any]
+    revision: int
+    data_updated_at: datetime | None
+    feature_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProvenanceRead(BaseModel):
+    id: str
+    source_type: str
+    source_name: str | None
+    source_url: str | None
+    source_record_id: str | None
+    import_id: str | None
+    created_by: str
+    confidence: str | None
+    observed_at: datetime | None
+    imported_at: datetime
+    verified_at: datetime | None
+    metadata_: dict[str, Any]
+
+
+class AdminFeatureRead(BaseModel):
+    id: str
+    layer_id: str
+    external_id: str | None
+    geometry: dict[str, Any]
+    properties: dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    verified_at: datetime | None
+    archived_at: datetime | None
+    provenance: list[ProvenanceRead] = Field(default_factory=list)
+
+
+class AdminImportRead(BaseModel):
+    id: str
+    layer_id: str
+    filename: str
+    format: str
+    status: str
+    row_count: int
+    valid_count: int
+    invalid_count: int
+    candidate_count: int
+    created_at: datetime
+    committed_at: datetime | None
+    cancelled_at: datetime | None
+
+
+class AdminImportRowRead(BaseModel):
+    row_number: int
+    external_id: str | None
+    geometry: dict[str, Any] | None
+    properties: dict[str, Any]
+    validation_error: str | None
+    candidate_feature_ids: list[str]
+
+
+class AdminSourceRead(BaseModel):
+    id: str
+    layer_id: str
+    slug: str
+    adapter: str
+    dataset_id: str
+    endpoint: str | None
+    enabled: bool
     status: str
     last_attempt_at: datetime | None
     last_success_at: datetime | None

@@ -461,8 +461,8 @@ def test_geojson_staging_validates_and_cancels_without_creating_features(
     )
     assert (
         client.get(
-            f"/api/v1/admin/imports/{staged.json()['id']}", headers=headers
-        ).json()["rows"]
+            f"/api/v1/admin/imports/{staged.json()['id']}/rows", headers=headers
+        ).json()["items"]
         == []
     )
 
