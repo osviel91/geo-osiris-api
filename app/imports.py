@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from geoalchemy2 import Geography
-from sqlalchemy import cast, func, literal, or_, select
+from sqlalchemy import and_, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, selectinload
 
@@ -402,17 +402,33 @@ def _reject_json_constant(_: str) -> None:
     raise ValueError("Invalid JSON constant")
 
 
-def _duplicate_detection(layer: Layer) -> tuple[list[str], float | None]:
+def _duplicate_detection(layer: Layer) -> dict[str, Any]:
     config = layer.metadata_.get("duplicate_detection")
     if not isinstance(config, dict):
-        return [], None
-    raw_properties = config.get("identity_properties")
-    identity_properties = (
-        [prop for prop in raw_properties if isinstance(prop, str) and prop]
-        if isinstance(raw_properties, list)
-        else []
-    )
+        return {"groups": [], "radius": None, "require_identity_signal": False}
+
+    groups: list[list[str]] = []
+    raw_groups = config.get("identity_groups")
+    if isinstance(raw_groups, list):
+        for group in raw_groups:
+            if isinstance(group, list):
+                props = [prop for prop in group if isinstance(prop, str) and prop]
+                if props:
+                    groups.append(props)
+    if not groups:
+        raw_properties = config.get("identity_properties")
+        if isinstance(raw_properties, list):
+            groups = [
+                [prop] for prop in raw_properties if isinstance(prop, str) and prop
+            ]
+
     raw_radius = config.get("coordinate_radius_m")
+    require_identity_signal = False
+    spatial = config.get("spatial")
+    if isinstance(spatial, dict):
+        raw_radius = spatial.get("radius_m")
+        require_identity_signal = spatial.get("require_identity_signal") is True
+
     radius = (
         float(raw_radius)
         if isinstance(raw_radius, (int, float))
@@ -420,7 +436,15 @@ def _duplicate_detection(layer: Layer) -> tuple[list[str], float | None]:
         and raw_radius > 0
         else None
     )
-    return identity_properties, radius
+    return {
+        "groups": groups,
+        "radius": radius,
+        "require_identity_signal": require_identity_signal,
+    }
+
+
+def _group_matches(group: list[str], properties: dict[str, Any]) -> bool:
+    return all(properties.get(prop) not in (None, "") for prop in group)
 
 
 def _candidate_matches(
@@ -430,15 +454,24 @@ def _candidate_matches(
     external_id: str | None,
     properties: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    identity_properties, radius = _duplicate_detection(layer)
+    detection = _duplicate_detection(layer)
+    groups = detection["groups"]
+    radius = detection["radius"]
+    require_identity_signal = detection["require_identity_signal"]
+
     predicates = []
     if external_id:
         predicates.append(Feature.external_id == external_id)
-    for prop in identity_properties:
-        value = properties.get(prop)
-        if value not in (None, ""):
+    for group in groups:
+        if _group_matches(group, properties):
             predicates.append(
-                Feature.properties[prop] == cast(literal(json.dumps(value)), JSONB)
+                and_(
+                    *(
+                        Feature.properties[prop]
+                        == cast(literal(json.dumps(properties[prop])), JSONB)
+                        for prop in group
+                    )
+                )
             )
 
     spatial = (
@@ -447,7 +480,7 @@ def _candidate_matches(
         and geometry.get("type") == "Point"
     )
     geometry_expr = _geometry(geometry) if spatial else None
-    if spatial:
+    if spatial and not require_identity_signal:
         predicates.append(
             func.ST_DWithin(
                 func.cast(Feature.geometry, Geography),
@@ -489,12 +522,20 @@ def _candidate_matches(
         reasons = []
         if external_id and row["external_id"] == external_id:
             reasons.append({"type": "external_id", "value": external_id})
-        for prop in identity_properties:
-            value = properties.get(prop)
-            if value not in (None, "") and row["properties"].get(prop) == value:
-                reasons.append(
-                    {"type": "property_exact", "property": prop, "value": value}
-                )
+        matched_properties: list[str] = []
+        for group in groups:
+            if not _group_matches(group, properties):
+                continue
+            if all(
+                row["properties"].get(prop) == properties.get(prop) for prop in group
+            ):
+                for prop in group:
+                    if prop not in matched_properties:
+                        matched_properties.append(prop)
+        for prop in matched_properties:
+            reasons.append(
+                {"type": "property_exact", "property": prop, "value": properties[prop]}
+            )
         if (
             spatial
             and row["distance_m"] is not None

@@ -421,3 +421,251 @@ def test_import_provenance_falls_back_to_filename() -> None:
     ).json()["provenance"]
     assert provenance[0]["source_name"] == "duplicates.csv"
     assert provenance[0]["source_url"] is None
+
+
+COMPOSITE_CONFIG = {
+    "identity_groups": [["callsign", "rx_frequency_mhz"]],
+    "spatial": {"radius_m": 300, "require_identity_signal": True},
+}
+
+
+def test_composite_identity_group_matches_all_properties() -> None:
+    layer = create_layer("dup-composite", duplicate_detection=COMPOSITE_CONFIG)
+    existing = create_feature(
+        layer["id"],
+        -3.7,
+        40.4,
+        properties={"callsign": "EA1", "rx_frequency_mhz": 145.725},
+    )
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz\n-3.7,40.4,EA1,145.725\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            }
+        },
+    )
+    assert staged["candidate_count"] == 1
+    match = rows(staged["id"])[0]["candidate_matches"][0]
+    assert match["feature_id"] == existing["id"]
+    assert {reason["type"] for reason in match["reasons"]} == {
+        "property_exact",
+        "spatial_proximity",
+    }
+    assert {
+        reason["property"]
+        for reason in match["reasons"]
+        if reason["type"] == "property_exact"
+    } == {"callsign", "rx_frequency_mhz"}
+
+
+def test_composite_identity_group_rejects_different_frequency() -> None:
+    layer = create_layer("dup-composite-freq", duplicate_detection=COMPOSITE_CONFIG)
+    create_feature(
+        layer["id"],
+        -3.7,
+        40.4,
+        properties={"callsign": "EA1", "rx_frequency_mhz": 145.725},
+    )
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz\n-3.7,40.4,EA1,438.5\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            }
+        },
+    )
+    assert staged["candidate_count"] == 0
+
+
+def test_spatial_requires_identity_signal() -> None:
+    layer = create_layer("dup-spatial-identity", duplicate_detection=COMPOSITE_CONFIG)
+    create_feature(
+        layer["id"],
+        -3.7,
+        40.4,
+        properties={"callsign": "EA1", "rx_frequency_mhz": 145.725},
+    )
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz\n-3.7,40.4,EA2,438.5\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            }
+        },
+    )
+    assert staged["candidate_count"] == 0
+
+
+def test_external_id_match_triggers_without_identity_group() -> None:
+    layer = create_layer("dup-extid-v2", duplicate_detection=COMPOSITE_CONFIG)
+    existing = create_feature(
+        layer["id"],
+        10.0,
+        10.0,
+        external_id="ext-9",
+        properties={"callsign": "OTHER", "rx_frequency_mhz": 1.0},
+    )
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,external_id,callsign,rx_frequency_mhz\n"
+        "-3.7,40.4,ext-9,EA1,145.725\n",
+        {
+            "external_id": "external_id",
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            },
+        },
+    )
+    assert staged["candidate_count"] == 1
+    match = rows(staged["id"])[0]["candidate_matches"][0]
+    assert match["feature_id"] == existing["id"]
+    assert [reason["type"] for reason in match["reasons"]] == ["external_id"]
+
+
+def test_multiple_identity_groups() -> None:
+    layer = create_layer(
+        "dup-groups",
+        duplicate_detection={
+            "identity_groups": [
+                ["callsign", "rx_frequency_mhz"],
+                ["locator"],
+            ],
+            "spatial": {"radius_m": 300, "require_identity_signal": True},
+        },
+    )
+    existing = create_feature(
+        layer["id"],
+        10.0,
+        10.0,
+        properties={"callsign": "X", "rx_frequency_mhz": 1.0, "locator": "IN70XX"},
+    )
+    staged = stage(
+        layer["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz,locator\n-3.7,40.4,Y,2.0,IN70XX\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+                "locator": "locator",
+            }
+        },
+    )
+    assert staged["candidate_count"] == 1
+    match = rows(staged["id"])[0]["candidate_matches"][0]
+    assert match["feature_id"] == existing["id"]
+    assert [reason["property"] for reason in match["reasons"]] == ["locator"]
+
+
+def test_identity_group_ignores_null_or_missing_properties() -> None:
+    layer = create_layer("dup-null-incoming", duplicate_detection=COMPOSITE_CONFIG)
+    create_feature(
+        layer["id"],
+        -3.7,
+        40.4,
+        properties={"callsign": "EA1", "rx_frequency_mhz": 145.725},
+    )
+    empty_incoming = stage(
+        layer["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz\n-3.7,40.4,EA1,\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            }
+        },
+    )
+    assert empty_incoming["candidate_count"] == 0
+
+    layer2 = create_layer("dup-null-existing", duplicate_detection=COMPOSITE_CONFIG)
+    create_feature(layer2["id"], 10.0, 10.0, properties={"callsign": "EA1"})
+    missing_existing = stage(
+        layer2["id"],
+        "longitude,latitude,callsign,rx_frequency_mhz\n10.0,10.0,EA1,145.725\n",
+        {
+            "properties": {
+                "callsign": "callsign",
+                "rx_frequency_mhz": {"column": "rx_frequency_mhz", "type": "number"},
+            }
+        },
+    )
+    assert missing_existing["candidate_count"] == 0
+
+
+def test_identity_group_number_vs_string_semantics() -> None:
+    layer = create_layer(
+        "dup-number-string",
+        duplicate_detection={"identity_groups": [["code"]]},
+    )
+    numeric = create_feature(layer["id"], 1.0, 1.0, properties={"code": 42})
+    text = create_feature(layer["id"], 2.0, 2.0, properties={"code": "42"})
+
+    as_number = stage(
+        layer["id"],
+        "longitude,latitude,code\n1.0,1.0,42\n",
+        {"properties": {"code": {"column": "code", "type": "number"}}},
+    )
+    assert as_number["candidate_count"] == 1
+    numeric_match = rows(as_number["id"])[0]["candidate_matches"][0]
+    assert numeric_match["feature_id"] == numeric["id"]
+
+    as_string = stage(
+        layer["id"],
+        "longitude,latitude,code\n2.0,2.0,42\n",
+        {"properties": {"code": {"column": "code", "type": "string"}}},
+    )
+    assert as_string["candidate_count"] == 1
+    assert rows(as_string["id"])[0]["candidate_matches"][0]["feature_id"] == text["id"]
+
+
+def test_v1_config_still_allows_spatial_only_candidate() -> None:
+    layer = create_layer(
+        "dup-v1-spatial",
+        duplicate_detection={
+            "identity_properties": ["callsign"],
+            "coordinate_radius_m": 300,
+        },
+    )
+    create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "OTHER"})
+    staged = stage(
+        layer["id"], "longitude,latitude,callsign\n-3.7,40.4,EA1\n"
+    )
+    assert staged["candidate_count"] == 1
+    reasons = rows(staged["id"])[0]["candidate_matches"][0]["reasons"]
+    assert [reason["type"] for reason in reasons] == ["spatial_proximity"]
+
+
+def test_generic_non_radio_identity_group() -> None:
+    layer = create_layer(
+        "dup-generic",
+        duplicate_detection={
+            "identity_groups": [["sensor_id", "reading_type"]],
+            "spatial": {"radius_m": 50, "require_identity_signal": True},
+        },
+    )
+    create_feature(
+        layer["id"],
+        -3.7,
+        40.4,
+        properties={"sensor_id": "S1", "reading_type": "temperature"},
+    )
+    different_type = stage(
+        layer["id"],
+        "longitude,latitude,sensor_id,reading_type\n-3.7,40.4,S1,humidity\n",
+        {"properties": {"sensor_id": "sensor_id", "reading_type": "reading_type"}},
+    )
+    assert different_type["candidate_count"] == 0
+
+    same_type = stage(
+        layer["id"],
+        "longitude,latitude,sensor_id,reading_type\n-3.7,40.4,S1,temperature\n",
+        {"properties": {"sensor_id": "sensor_id", "reading_type": "reading_type"}},
+    )
+    assert same_type["candidate_count"] == 1
