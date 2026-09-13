@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_session, is_ready
+from app.imports import cancel_import, commit_import, get_import, stage_import
 from app.layers import get_layer_geojson, list_compatibility_layers, list_layers
 from app.managed import (
     archive_feature,
@@ -23,6 +24,9 @@ from app.schemas import (
     CompatibilityLayersResponse,
     FeatureWrite,
     GeoJSONFeatureCollection,
+    ImportCommit,
+    ImportCreate,
+    ImportSummary,
     LayerCreate,
     LayerSummary,
     LayerUpdate,
@@ -195,6 +199,51 @@ def admin_archive_feature(
     feature_id: uuid.UUID, session: Session = Depends(get_session)
 ) -> None:
     archive_feature(session, feature_id)
+
+
+@app.post(
+    "/api/v1/admin/imports",
+    response_model=ImportSummary,
+    dependencies=[Depends(require_admin)],
+)
+def admin_stage_import(
+    payload: ImportCreate, session: Session = Depends(get_session)
+) -> ImportSummary:
+    return stage_import(session, payload)
+
+
+@app.get(
+    "/api/v1/admin/imports/{import_id}",
+    response_model=ImportSummary,
+    dependencies=[Depends(require_admin)],
+)
+def admin_get_import(
+    import_id: uuid.UUID, session: Session = Depends(get_session)
+) -> ImportSummary:
+    return get_import(session, import_id)
+
+
+@app.post(
+    "/api/v1/admin/imports/{import_id}/commit",
+    response_model=ImportSummary,
+    dependencies=[Depends(require_admin)],
+)
+def admin_commit_import(
+    import_id: uuid.UUID,
+    payload: ImportCommit,
+    session: Session = Depends(get_session),
+) -> ImportSummary:
+    return commit_import(session, import_id, payload)
+
+
+@app.delete(
+    "/api/v1/admin/imports/{import_id}",
+    dependencies=[Depends(require_admin)],
+)
+def admin_cancel_import(
+    import_id: uuid.UUID, session: Session = Depends(get_session)
+) -> None:
+    cancel_import(session, import_id)
 
 
 @app.get("/layers", response_model=CompatibilityLayersResponse)

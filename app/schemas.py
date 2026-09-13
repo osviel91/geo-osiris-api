@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -107,3 +108,33 @@ class AdminFeature(BaseModel):
     id: str
     layer_id: str
     status: str
+
+
+class ImportCreate(BaseModel):
+    layer_id: UUID
+    filename: str = Field(max_length=255)
+    format: Literal["geojson", "csv"]
+    content: str = Field(max_length=5_000_000)
+    csv_mapping: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportCommit(BaseModel):
+    status: Literal["draft", "published"] = "draft"
+
+
+class ImportRowSummary(BaseModel):
+    row_number: int
+    validation_error: str | None
+    candidate_feature_ids: list[str]
+
+
+class ImportSummary(BaseModel):
+    id: str
+    layer_id: str
+    filename: str
+    format: str
+    status: str
+    row_count: int
+    invalid_count: int
+    candidate_count: int
+    rows: list[ImportRowSummary]

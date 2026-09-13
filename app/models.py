@@ -40,6 +40,7 @@ class Layer(Base):
     )
 
     features: Mapped[list["Feature"]] = relationship(back_populates="layer")
+    imports: Mapped[list["ImportJob"]] = relationship(back_populates="layer")
 
     __table_args__ = (
         CheckConstraint("mode IN ('managed', 'external')", name="layers_mode_check"),
@@ -110,3 +111,53 @@ class FeatureProvenance(Base):
             name="feature_provenance_source_type_check",
         ),
     )
+
+
+class ImportJob(Base):
+    __tablename__ = "imports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    layer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("layers.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    format: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(20), default="validated")
+    row_count: Mapped[int] = mapped_column(default=0)
+    invalid_count: Mapped[int] = mapped_column(default=0)
+    candidate_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    committed_at: Mapped[datetime | None]
+    cancelled_at: Mapped[datetime | None]
+
+    layer: Mapped[Layer] = relationship(back_populates="imports")
+    rows: Mapped[list["ImportRow"]] = relationship(
+        back_populates="import_job", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("format IN ('geojson', 'csv')", name="imports_format_check"),
+        CheckConstraint(
+            "status IN ('validated', 'committed', 'cancelled')",
+            name="imports_status_check",
+        ),
+    )
+
+
+class ImportRow(Base):
+    __tablename__ = "import_rows"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    import_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("imports.id", ondelete="CASCADE"), index=True
+    )
+    row_number: Mapped[int] = mapped_column()
+    external_id: Mapped[str | None] = mapped_column(String(200))
+    geometry: Mapped[dict | None] = mapped_column(JSONB)
+    properties: Mapped[dict] = mapped_column(JSONB, default=dict)
+    validation_error: Mapped[str | None] = mapped_column(Text)
+    candidate_feature_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+
+    import_job: Mapped[ImportJob] = relationship(back_populates="rows")

@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from datetime import UTC, datetime
@@ -25,12 +26,18 @@ client = TestClient(app)
 def empty_database():
     with engine.begin() as connection:
         connection.execute(
-            text("TRUNCATE feature_provenance, features, layers CASCADE")
+            text(
+                "TRUNCATE import_rows, imports, feature_provenance, "
+                "features, layers CASCADE"
+            )
         )
     yield
     with engine.begin() as connection:
         connection.execute(
-            text("TRUNCATE feature_provenance, features, layers CASCADE")
+            text(
+                "TRUNCATE import_rows, imports, feature_provenance, "
+                "features, layers CASCADE"
+            )
         )
 
 
@@ -261,3 +268,145 @@ def test_admin_manages_and_archives_generic_radio_features(monkeypatch) -> None:
     archived = client.delete(f"/api/v1/admin/features/{feature_id}", headers=headers)
     assert archived.status_code == 200
     assert client.get("/api/v1/layers/managed-radio").json()["features"] == []
+
+
+def test_geojson_staging_validates_and_cancels_without_creating_features(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+    layer = client.post(
+        "/api/v1/admin/layers",
+        headers=headers,
+        json={
+            "slug": "geojson-staging",
+            "name": "GeoJSON staging",
+            "category": "TEST",
+            "mode": "managed",
+            "geometry_types": ["Point"],
+        },
+    ).json()
+    staged = client.post(
+        "/api/v1/admin/imports",
+        headers=headers,
+        json={
+            "layer_id": layer["id"],
+            "filename": "repeaters.geojson",
+            "format": "geojson",
+            "content": json.dumps(
+                {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [-3.7, 40.4],
+                            },
+                            "properties": {"callsign": "DEMO-STAGED"},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [200, 40.4],
+                            },
+                            "properties": {},
+                        },
+                    ],
+                }
+            ),
+        },
+    )
+
+    assert staged.status_code == 200
+    assert staged.json()["row_count"] == 2
+    assert staged.json()["invalid_count"] == 1
+    assert client.get("/api/v1/layers/geojson-staging").json()["features"] == []
+
+    assert (
+        client.delete(
+            f"/api/v1/admin/imports/{staged.json()['id']}", headers=headers
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            f"/api/v1/admin/imports/{staged.json()['id']}", headers=headers
+        ).json()["rows"]
+        == []
+    )
+
+
+def test_csv_import_reports_candidates_then_commits_to_public_geojson(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    headers = {"Authorization": "Bearer test-token"}
+    layer = client.post(
+        "/api/v1/admin/layers",
+        headers=headers,
+        json={
+            "slug": "csv-staging",
+            "name": "CSV staging",
+            "category": "TEST",
+            "mode": "managed",
+            "geometry_types": ["Point"],
+        },
+    ).json()
+    existing = client.post(
+        f"/api/v1/admin/layers/{layer['id']}/features",
+        headers=headers,
+        json={
+            "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+            "properties": {"callsign": "DEMO-DUPLICATE"},
+            "status": "published",
+        },
+    ).json()
+    candidates = client.post(
+        "/api/v1/admin/imports",
+        headers=headers,
+        json={
+            "layer_id": layer["id"],
+            "filename": "candidate.csv",
+            "format": "csv",
+            "content": "longitude,latitude,callsign\n-3.7,40.4,DEMO-DUPLICATE\n",
+        },
+    )
+
+    assert candidates.json()["candidate_count"] == 1
+    assert candidates.json()["rows"][0]["candidate_feature_ids"] == [existing["id"]]
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{candidates.json()['id']}/commit",
+            headers=headers,
+            json={"status": "published"},
+        ).status_code
+        == 409
+    )
+
+    clean = client.post(
+        "/api/v1/admin/imports",
+        headers=headers,
+        json={
+            "layer_id": layer["id"],
+            "filename": "clean.csv",
+            "format": "csv",
+            "content": "longitude,latitude,callsign\n-3.8,40.5,DEMO-IMPORTED\n",
+        },
+    )
+    committed = client.post(
+        f"/api/v1/admin/imports/{clean.json()['id']}/commit",
+        headers=headers,
+        json={"status": "published"},
+    )
+
+    assert committed.json()["status"] == "committed"
+    public = client.get("/api/v1/layers/csv-staging").json()
+    assert {feature["properties"]["callsign"] for feature in public["features"]} == {
+        "DEMO-DUPLICATE",
+        "DEMO-IMPORTED",
+    }
+    assert "/layers/csv-staging" in [
+        layer["endpoint"] for layer in client.get("/layers").json()["layers"]
+    ]
