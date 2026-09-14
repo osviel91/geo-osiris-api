@@ -1,0 +1,15 @@
+# File-backed Authelia users. Never commit a plaintext password.
+#
+# Generate an Argon2 hash locally and paste it in place of the placeholder:
+#   docker run --rm -it authelia/authelia:4.38 \
+#     authelia crypto hash generate argon2
+#
+# The hash below is a one-way Argon2id digest; the plaintext is never stored.
+---
+users:
+  admin:
+    displayname: "Geo Hub Admin"
+    password: '$argon2id$v=19$m=65536,t=3,p=4$Wv9p/AFNuLNABbzmbtFBRA$XE2rHafPQAHUwOHvBQQcfID5d3gs39xTsZ47lquT9GQ'
+    email: "admin@osiris.home.arpa"
+    groups:
+      - admins

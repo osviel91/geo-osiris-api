@@ -1,0 +1,59 @@
+# Authelia configuration for the Geo Hub staging admin.
+#
+# Secrets are NOT stored here. They are supplied as environment variables using
+# Authelia's native env mapping:
+#   AUTHELIA_SESSION_SECRET
+#   AUTHELIA_STORAGE_ENCRYPTION_KEY
+#   AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET
+#
+# NOTE: the session cookie domain MUST NOT be a Public Suffix List entry.
+# `home.arpa` IS in the PSL (RFC 8375), so Authelia rejects it outright. The
+# namespace therefore uses a registrable child, `osiris.home.arpa`, which is
+# still inside the home.arpa private namespace and passes Authelia validation.
+---
+theme: auto
+
+server:
+  address: "tcp://0.0.0.0:9091"
+  endpoints:
+    authz:
+      auth-request:
+        implementation: "AuthRequest"
+
+log:
+  level: "info"
+
+totp:
+  issuer: "geo-osiris"
+
+authentication_backend:
+  file:
+    path: "/config/users_database.yml"
+
+access_control:
+  default_policy: "deny"
+  rules:
+    - domain: "geo-admin.osiris.home.arpa"
+      policy: "one_factor"
+
+session:
+  name: "authelia_session"
+  expiration: "1h"
+  inactivity: "5m"
+  cookies:
+    - domain: "osiris.home.arpa"
+      authelia_url: "https://auth.osiris.home.arpa/"
+      default_redirection_url: "https://geo-admin.osiris.home.arpa/"
+
+regulation:
+  max_retries: 3
+  find_time: "2m"
+  ban_time: "5m"
+
+storage:
+  local:
+    path: "/data/db.sqlite3"
+
+notifier:
+  filesystem:
+    filename: "/data/notification.txt"

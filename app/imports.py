@@ -1,22 +1,34 @@
 import csv
+import hashlib
 import io
 import json
 import math
+import os
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
 from geoalchemy2 import Geography
 from sqlalchemy import and_, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.freshness import touch_layer_data
 from app.geometry import validate_geometry, validate_properties
-from app.models import Feature, FeatureProvenance, ImportJob, ImportRow, Layer
+from app.models import (
+    Feature,
+    FeatureProvenance,
+    ImportApproval,
+    ImportJob,
+    ImportRow,
+    Layer,
+)
 from app.schemas import (
+    ApprovalDecision,
+    ImportApprovalRead,
     ImportCommit,
     ImportCreate,
     ImportRowResolution,
@@ -65,10 +77,40 @@ def stage_import(session: Session, payload: ImportCreate) -> ImportSummary:
     return _summary(job)
 
 
-def commit_import(
-    session: Session, import_id: uuid.UUID, payload: ImportCommit
+def execute_approved_import(
+    session: Session, import_id: uuid.UUID, payload: ImportCommit, executor: str
 ) -> ImportSummary:
-    job = _job(session, import_id)
+    job = _locked_job(session, import_id)
+    approval = _active_approval(session, import_id, lock=True)
+    if approval is None:
+        raise HTTPException(status_code=409, detail="No active approval request")
+    _require_approved(session, approval)
+    status = payload.status if payload.status is not None else approval.requested_status
+    if approval.requested_status != status:
+        raise HTTPException(
+            status_code=409, detail="Approved output status does not match"
+        )
+    if approval.fingerprint != _fingerprint(_snapshot(job, status)):
+        approval.state = "stale"
+        session.commit()
+        raise HTTPException(status_code=409, detail="Approval is stale")
+    try:
+        with session.begin_nested():
+            _commit_job(session, job, ImportCommit(status=status))
+            session.flush()
+    except SQLAlchemyError:
+        approval.state = "failed"
+        approval.failure_reason = "Authoritative import commit failed"
+        session.commit()
+        raise HTTPException(status_code=409, detail="Publication failed") from None
+    approval.state = "executed"
+    approval.executor = executor
+    approval.executed_at = datetime.now(UTC)
+    session.commit()
+    return _summary(job)
+
+
+def _commit_job(session: Session, job: ImportJob, payload: ImportCommit) -> None:
     if job.status != "validated":
         raise HTTPException(status_code=409, detail="Import is no longer pending")
     if job.invalid_count:
@@ -112,16 +154,15 @@ def commit_import(
     job.committed_at = datetime.now(UTC)
     if payload.status == "published" and committed:
         touch_layer_data(session, job.layer_id)
-    session.commit()
-    return _summary(job)
 
 
 def cancel_import(session: Session, import_id: uuid.UUID) -> None:
-    job = _job(session, import_id)
+    job = _locked_job(session, import_id)
     if job.status != "validated":
         raise HTTPException(status_code=409, detail="Import is no longer pending")
     job.status = "cancelled"
     job.cancelled_at = datetime.now(UTC)
+    _stale_active_approval(session, import_id)
     session.commit()
 
 
@@ -131,9 +172,7 @@ def resolve_import_row(
     row_number: int,
     payload: ImportRowResolution,
 ) -> ImportRow:
-    job = session.get(ImportJob, import_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Import not found")
+    job = _locked_job(session, import_id)
     if job.status != "validated":
         raise HTTPException(
             status_code=409, detail="Only validated imports can be resolved"
@@ -151,9 +190,85 @@ def resolve_import_row(
         )
     row.resolution = payload.resolution
     row.resolved_at = datetime.now(UTC)
+    _stale_active_approval(session, import_id)
     session.commit()
     session.refresh(row)
     return row
+
+
+def create_approval_request(
+    session: Session,
+    import_id: uuid.UUID,
+    payload: ImportCommit,
+    requester: str,
+) -> ImportApprovalRead:
+    if payload.status is None:
+        raise HTTPException(status_code=422, detail="status is required")
+    job = _locked_job(session, import_id)
+    _ensure_ready(job)
+    _expire_active_approval(session, import_id)
+    if _active_approval(session, import_id, lock=True) is not None:
+        raise HTTPException(
+            status_code=409, detail="Import already has an active approval"
+        )
+    snapshot = _snapshot(job, payload.status)
+    approval = ImportApproval(
+        import_id=job.id,
+        snapshot=snapshot,
+        fingerprint=_fingerprint(snapshot),
+        requested_status=payload.status,
+        requester=requester,
+        expires_at=datetime.now(UTC) + timedelta(minutes=_approval_ttl_minutes()),
+    )
+    session.add(approval)
+    session.commit()
+    session.refresh(approval)
+    return approval_read(approval)
+
+
+def decide_approval(
+    session: Session,
+    import_id: uuid.UUID,
+    payload: ApprovalDecision,
+    approver: str,
+) -> ImportApprovalRead:
+    _locked_job(session, import_id)
+    approval = _active_approval(session, import_id, lock=True)
+    if approval is None:
+        raise HTTPException(status_code=409, detail="No active approval request")
+    _expire_or_raise(session, approval)
+    if approval.state != "pending":
+        raise HTTPException(status_code=409, detail="Approval has already been decided")
+    approval.approver = approver
+    approval.approved_at = datetime.now(UTC)
+    if payload.decision == "approve":
+        approval.state = "approved"
+    else:
+        approval.state = "rejected"
+        approval.rejection_reason = payload.reason
+    session.commit()
+    session.refresh(approval)
+    return approval_read(approval)
+
+
+def approval_read(approval: ImportApproval) -> ImportApprovalRead:
+    return ImportApprovalRead(
+        id=str(approval.id),
+        import_id=str(approval.import_id),
+        fingerprint=approval.fingerprint,
+        requested_status=approval.requested_status,
+        requester=approval.requester,
+        requested_at=approval.requested_at,
+        state=approval.state,
+        approver=approval.approver,
+        approved_at=approval.approved_at,
+        rejection_reason=approval.rejection_reason,
+        expires_at=approval.expires_at,
+        executor=approval.executor,
+        executed_at=approval.executed_at,
+        failure_reason=approval.failure_reason,
+        snapshot=approval.snapshot,
+    )
 
 
 def _stage_row(
@@ -583,11 +698,136 @@ def _geometry(geometry: dict[str, Any] | None) -> Any:
     return func.ST_SetSRID(func.ST_GeomFromGeoJSON(json.dumps(geometry)), 4326)
 
 
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def _snapshot(job: ImportJob, requested_status: str) -> dict[str, Any]:
+    rows = [
+        {
+            "row_number": row.row_number,
+            "external_id": row.external_id,
+            "geometry": row.geometry,
+            "properties": row.properties,
+            "validation_error": row.validation_error,
+            "candidate_feature_ids": row.candidate_feature_ids,
+            "candidate_matches": row.candidate_matches,
+            "resolution": row.resolution,
+        }
+        for row in sorted(job.rows, key=lambda row: row.row_number)
+    ]
+    mapping = {
+        "csv_mapping": job.csv_mapping,
+        "csv_headers": job.csv_headers,
+        "mapping_version": job.mapping_version,
+    }
+    resolved = sum(
+        bool(row["candidate_feature_ids"] and row["resolution"]) for row in rows
+    )
+    return {
+        "import_id": str(job.id),
+        "layer_id": str(job.layer_id),
+        "filename": job.filename,
+        "format": job.format,
+        "source_name": job.source_name,
+        "source_url": job.source_url,
+        "status": job.status,
+        "requested_status": requested_status,
+        "row_count": job.row_count,
+        "valid_count": max(job.row_count - job.invalid_count, 0),
+        "invalid_count": job.invalid_count,
+        "candidate_count": job.candidate_count,
+        "resolved_candidate_count": resolved,
+        "unresolved_candidate_count": job.candidate_count - resolved,
+        "mapping": mapping,
+        "mapping_hash": _digest(mapping),
+        "content_hash": _digest(rows),
+        "rows": rows,
+    }
+
+
+def _fingerprint(snapshot: dict[str, Any]) -> str:
+    return _digest(snapshot)
+
+
+def _approval_ttl_minutes() -> int:
+    try:
+        return max(1, int(os.getenv("APPROVAL_TTL_MINUTES", "60")))
+    except ValueError as error:
+        raise RuntimeError("APPROVAL_TTL_MINUTES must be an integer") from error
+
+
+def _active_approval(
+    session: Session, import_id: uuid.UUID, lock: bool = False
+) -> ImportApproval | None:
+    statement = select(ImportApproval).where(
+        ImportApproval.import_id == import_id,
+        ImportApproval.state.in_(("pending", "approved")),
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return session.scalar(statement)
+
+
+def _expire_active_approval(session: Session, import_id: uuid.UUID) -> None:
+    approval = _active_approval(session, import_id, lock=True)
+    if approval is not None and approval.expires_at <= datetime.now(UTC):
+        approval.state = "expired"
+
+
+def _expire_or_raise(session: Session, approval: ImportApproval) -> None:
+    if approval.expires_at <= datetime.now(UTC):
+        approval.state = "expired"
+        session.commit()
+        raise HTTPException(status_code=409, detail="Approval has expired")
+
+
+def _stale_active_approval(session: Session, import_id: uuid.UUID) -> None:
+    approval = _active_approval(session, import_id, lock=True)
+    if approval is not None:
+        approval.state = "stale"
+
+
+def _require_approved(session: Session, approval: ImportApproval) -> None:
+    _expire_or_raise(session, approval)
+    if approval.state != "approved":
+        raise HTTPException(status_code=409, detail="Approval is not approved")
+
+
+def _ensure_ready(job: ImportJob) -> None:
+    if job.status != "validated":
+        raise HTTPException(status_code=409, detail="Import is no longer pending")
+    if job.invalid_count:
+        raise HTTPException(
+            status_code=409, detail="Resolve invalid rows before committing"
+        )
+    if any(row.candidate_feature_ids and row.resolution is None for row in job.rows):
+        raise HTTPException(
+            status_code=409, detail="Resolve duplicate candidates before committing"
+        )
+
+
 def _job(session: Session, import_id: uuid.UUID) -> ImportJob:
     job = session.scalar(
         select(ImportJob)
         .where(ImportJob.id == import_id)
         .options(selectinload(ImportJob.rows))
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Import not found")
+    return job
+
+
+def _locked_job(session: Session, import_id: uuid.UUID) -> ImportJob:
+    job = session.scalar(
+        select(ImportJob)
+        .where(ImportJob.id == import_id)
+        .options(selectinload(ImportJob.rows))
+        .with_for_update()
     )
     if job is None:
         raise HTTPException(status_code=404, detail="Import not found")

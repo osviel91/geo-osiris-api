@@ -1,5 +1,7 @@
 .env
 .venv/
+deploy/staging/.env.staging
+deploy/staging/certs/
 __pycache__/
 .pytest_cache/
 .ruff_cache/

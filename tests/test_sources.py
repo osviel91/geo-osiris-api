@@ -40,7 +40,8 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -100,7 +101,7 @@ def test_external_source_sync_is_idempotent_and_preserves_last_good_data(
             session.commit()
             source_id = source.id
 
-        monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
         headers = {"Authorization": "Bearer test-token"}
         assert client.post(f"/api/v1/admin/sources/{source_id}/sync").status_code == 401
         first = client.post(f"/api/v1/admin/sources/{source_id}/sync", headers=headers)
@@ -173,7 +174,7 @@ def test_external_sync_updates_layer_revision(monkeypatch) -> None:
             session.commit()
             source_id, layer_id = source.id, layer.id
 
-        monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
         headers = {"Authorization": "Bearer test-token"}
         endpoint = f"/api/v1/admin/sources/{source_id}/sync"
 
@@ -230,7 +231,7 @@ def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(
 
     monkeypatch.setenv("AEMET_API_KEY", "offline-key")
     monkeypatch.setattr(aemet, "_request_json", request_json)
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     with Session(engine) as session:
         layer = Layer(
             slug="aemet-fixture",

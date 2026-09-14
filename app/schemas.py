@@ -148,7 +148,61 @@ class ImportCreate(BaseModel):
 
 
 class ImportCommit(BaseModel):
-    status: Literal["draft", "published"] = "draft"
+    status: Literal["draft", "published"] | None = None
+
+
+class ApprovalDecision(BaseModel):
+    decision: Literal["approve", "reject"]
+    reason: str | None = Field(default=None, max_length=1_000)
+
+
+class ImportApprovalRead(BaseModel):
+    id: str
+    import_id: str
+    fingerprint: str
+    requested_status: str
+    requester: str
+    requested_at: datetime
+    state: str
+    approver: str | None
+    approved_at: datetime | None
+    rejection_reason: str | None
+    expires_at: datetime
+    executor: str | None
+    executed_at: datetime | None
+    failure_reason: str | None
+    snapshot: dict[str, Any]
+
+
+class ImportApprovalSummary(BaseModel):
+    id: str
+    import_id: str
+    layer_id: str
+    layer_name: str
+    layer_slug: str
+    filename: str
+    format: str
+    source_name: str | None
+    source_url: str | None
+    mapping_version: str
+    requested_status: str
+    requester: str
+    requested_at: datetime
+    state: str
+    approver: str | None
+    approved_at: datetime | None
+    rejection_reason: str | None
+    expires_at: datetime
+    executor: str | None
+    executed_at: datetime | None
+    failure_reason: str | None
+    fingerprint: str
+    row_count: int
+    valid_count: int
+    invalid_count: int
+    candidate_count: int
+    resolved_candidate_count: int
+    unresolved_candidate_count: int
 
 
 class ImportSummary(BaseModel):

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -145,6 +146,9 @@ class ImportJob(Base):
     rows: Mapped[list["ImportRow"]] = relationship(
         back_populates="import_job", cascade="all, delete-orphan"
     )
+    approvals: Mapped[list["ImportApproval"]] = relationship(
+        back_populates="import_job", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint("format IN ('geojson', 'csv')", name="imports_format_check"),
@@ -180,6 +184,48 @@ class ImportRow(Base):
         CheckConstraint(
             "resolution IS NULL OR resolution IN ('skip', 'import_anyway')",
             name="import_rows_resolution_check",
+        ),
+    )
+
+
+class ImportApproval(Base):
+    __tablename__ = "import_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    import_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("imports.id"), index=True)
+    snapshot: Mapped[dict] = mapped_column(JSONB)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    requested_status: Mapped[str] = mapped_column(String(20))
+    requester: Mapped[str] = mapped_column(String(100))
+    requested_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    state: Mapped[str] = mapped_column(String(20), default="pending")
+    approver: Mapped[str | None] = mapped_column(String(100))
+    approved_at: Mapped[datetime | None]
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime]
+    executor: Mapped[str | None] = mapped_column(String(100))
+    executed_at: Mapped[datetime | None]
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+
+    import_job: Mapped[ImportJob] = relationship(back_populates="approvals")
+
+    __table_args__ = (
+        CheckConstraint(
+            "requested_status IN ('draft', 'published')",
+            name="import_approvals_requested_status_check",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'approved', 'rejected', 'expired', "
+            "'stale', 'executed', 'failed')",
+            name="import_approvals_state_check",
+        ),
+        Index(
+            "import_approvals_one_active_per_import",
+            "import_id",
+            unique=True,
+            postgresql_where=text("state IN ('pending', 'approved')"),
         ),
     )
 

@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -13,6 +13,7 @@ from app.models import (
     ExternalSource,
     Feature,
     FeatureProvenance,
+    ImportApproval,
     ImportJob,
     ImportRow,
     Layer,
@@ -24,8 +25,19 @@ from app.schemas import (
     AdminImportRowRead,
     AdminLayerRead,
     AdminSourceRead,
+    ImportApprovalSummary,
     ProvenanceRead,
 )
+
+APPROVAL_STATES = {
+    "pending",
+    "approved",
+    "rejected",
+    "expired",
+    "stale",
+    "executed",
+    "failed",
+}
 
 
 def _uuid(value: Any) -> uuid.UUID:
@@ -342,6 +354,112 @@ def list_admin_import_rows(
         rows = rows[:limit]
         next_cursor = encode_cursor({"row_number": rows[-1].row_number})
     return [import_row_read(row) for row in rows], next_cursor
+
+
+def _expire_due(session: Session, approvals: list[ImportApproval]) -> None:
+    now = datetime.now(UTC)
+    changed = False
+    for approval in approvals:
+        if approval.state in ("pending", "approved") and approval.expires_at <= now:
+            approval.state = "expired"
+            changed = True
+    if changed:
+        session.commit()
+
+
+def _approval_summary(approval: ImportApproval, layer: Layer) -> ImportApprovalSummary:
+    snapshot = approval.snapshot or {}
+    mapping = snapshot.get("mapping") or {}
+    return ImportApprovalSummary(
+        id=str(approval.id),
+        import_id=str(approval.import_id),
+        layer_id=str(layer.id),
+        layer_name=layer.name,
+        layer_slug=layer.slug,
+        filename=snapshot.get("filename") or "",
+        format=snapshot.get("format") or "",
+        source_name=snapshot.get("source_name"),
+        source_url=snapshot.get("source_url"),
+        mapping_version=mapping.get("mapping_version") or "",
+        requested_status=approval.requested_status,
+        requester=approval.requester,
+        requested_at=approval.requested_at,
+        state=approval.state,
+        approver=approval.approver,
+        approved_at=approval.approved_at,
+        rejection_reason=approval.rejection_reason,
+        expires_at=approval.expires_at,
+        executor=approval.executor,
+        executed_at=approval.executed_at,
+        failure_reason=approval.failure_reason,
+        fingerprint=approval.fingerprint,
+        row_count=snapshot.get("row_count") or 0,
+        valid_count=snapshot.get("valid_count") or 0,
+        invalid_count=snapshot.get("invalid_count") or 0,
+        candidate_count=snapshot.get("candidate_count") or 0,
+        resolved_candidate_count=snapshot.get("resolved_candidate_count") or 0,
+        unresolved_candidate_count=snapshot.get("unresolved_candidate_count") or 0,
+    )
+
+
+def list_admin_approvals(
+    session: Session,
+    state: str | None,
+    import_id: uuid.UUID | None,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[ImportApprovalSummary], str | None]:
+    limit = clamp_limit(limit)
+    state_filter = None
+    if state == "active":
+        state_filter = ImportApproval.state.in_(("pending", "approved"))
+    elif state:
+        if state not in APPROVAL_STATES:
+            raise HTTPException(status_code=422, detail="Unknown approval state")
+        state_filter = ImportApproval.state == state
+    statement = (
+        select(ImportApproval, Layer)
+        .join(ImportJob, ImportJob.id == ImportApproval.import_id)
+        .join(Layer, Layer.id == ImportJob.layer_id)
+    )
+    if import_id is not None:
+        statement = statement.where(ImportApproval.import_id == import_id)
+    if state_filter is not None:
+        statement = statement.where(state_filter)
+    if cursor:
+        data = decode_cursor(cursor, {"requested_at", "id"})
+        statement = statement.where(
+            tuple_(ImportApproval.requested_at, ImportApproval.id)
+            < (_datetime(data["requested_at"]), _uuid(data["id"]))
+        )
+    statement = statement.order_by(
+        ImportApproval.requested_at.desc(), ImportApproval.id.desc()
+    ).limit(limit + 1)
+    rows = list(session.execute(statement))
+    next_cursor = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1][0]
+        next_cursor = encode_cursor(
+            {"requested_at": last.requested_at.isoformat(), "id": str(last.id)}
+        )
+    _expire_due(session, [approval for approval, _ in rows])
+    return [_approval_summary(approval, layer) for approval, layer in rows], next_cursor
+
+
+def get_admin_approval(
+    session: Session, approval_id: uuid.UUID
+) -> ImportApprovalSummary:
+    row = session.execute(
+        select(ImportApproval, Layer)
+        .join(ImportJob, ImportJob.id == ImportApproval.import_id)
+        .join(Layer, Layer.id == ImportJob.layer_id)
+        .where(ImportApproval.id == approval_id)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    _expire_due(session, [row[0]])
+    return _approval_summary(row[0], row[1])
 
 
 def list_admin_sources(

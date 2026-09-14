@@ -14,6 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 client = TestClient(app)
 HEADERS = {"Authorization": "Bearer test-token"}
+PUBLISH_HEADERS = {"Authorization": "Bearer publish-token"}
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +22,8 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -30,7 +32,33 @@ def empty_database():
 
 @pytest.fixture(autouse=True)
 def admin_token(monkeypatch):
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_APPROVE_TOKEN", "approve-token")
+    monkeypatch.setenv("GEO_PUBLISH_TOKEN", "publish-token")
+
+
+def commit(import_id: str, status: str = "published"):
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval-request",
+            headers=HEADERS,
+            json={"status": status},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval",
+            headers={"Authorization": "Bearer approve-token"},
+            json={"decision": "approve"},
+        ).status_code
+        == 200
+    )
+    return client.post(
+        f"/api/v1/admin/imports/{import_id}/commit",
+        headers=PUBLISH_HEADERS,
+        json={"status": status},
+    )
 
 
 def create_layer(slug: str, **metadata) -> dict:
@@ -170,7 +198,7 @@ def test_resolution_skip_and_import_anyway_control_commit() -> None:
     skipped = stage(layer["id"], "longitude,latitude,callsign\n-3.7,40.4,DUP\n")
     blocked = client.post(
         f"/api/v1/admin/imports/{skipped['id']}/commit",
-        headers=HEADERS,
+        headers=PUBLISH_HEADERS,
         json={"status": "published"},
     )
     assert blocked.status_code == 409
@@ -182,14 +210,7 @@ def test_resolution_skip_and_import_anyway_control_commit() -> None:
     assert resolved.status_code == 200
     assert resolved.json()["resolution"] == "skip"
     assert resolved.json()["resolved_at"] is not None
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{skipped['id']}/commit",
-            headers=HEADERS,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(skipped["id"]).status_code == 200
     assert len(client.get(public).json()["features"]) == 1
 
     forced = stage(layer["id"], "longitude,latitude,callsign\n-3.7,40.4,DUP\n")
@@ -201,14 +222,7 @@ def test_resolution_skip_and_import_anyway_control_commit() -> None:
         ).status_code
         == 200
     )
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{forced['id']}/commit",
-            headers=HEADERS,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(forced["id"]).status_code == 200
     assert len(client.get(public).json()["features"]) == 2
 
 
@@ -223,14 +237,7 @@ def test_resolution_requires_candidates_and_validated_import() -> None:
         json={"resolution": "skip"},
     )
     assert no_candidates.status_code == 409
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{clean['id']}/commit",
-            headers=HEADERS,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(clean["id"]).status_code == 200
     after_commit = client.post(
         f"/api/v1/admin/imports/{clean['id']}/rows/1/resolution",
         headers=HEADERS,
@@ -360,7 +367,7 @@ def test_commit_rejects_unresolved_candidates_independently() -> None:
     assert detail["invalid_count"] == 0
     assert detail["unresolved_candidate_count"] == 1
     blocked = client.post(
-        f"/api/v1/admin/imports/{staged['id']}/commit",
+        f"/api/v1/admin/imports/{staged['id']}/approval-request",
         headers=HEADERS,
         json={"status": "published"},
     )
@@ -380,14 +387,7 @@ def test_import_provenance_source_round_trip() -> None:
     assert detail["source_name"] == "URE Madrid repeater directory"
     assert detail["source_url"] == "https://example.test/ure"
 
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{staged['id']}/commit",
-            headers=HEADERS,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(staged["id"]).status_code == 200
     features = client.get(
         f"/api/v1/admin/layers/{layer['id']}/features", headers=HEADERS
     ).json()["items"]
@@ -405,14 +405,7 @@ def test_import_provenance_falls_back_to_filename() -> None:
     detail = import_detail(staged["id"])
     assert detail["source_name"] is None
     assert detail["source_url"] is None
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{staged['id']}/commit",
-            headers=HEADERS,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(staged["id"]).status_code == 200
     features = client.get(
         f"/api/v1/admin/layers/{layer['id']}/features", headers=HEADERS
     ).json()["items"]
@@ -634,9 +627,7 @@ def test_v1_config_still_allows_spatial_only_candidate() -> None:
         },
     )
     create_feature(layer["id"], -3.7, 40.4, properties={"callsign": "OTHER"})
-    staged = stage(
-        layer["id"], "longitude,latitude,callsign\n-3.7,40.4,EA1\n"
-    )
+    staged = stage(layer["id"], "longitude,latitude,callsign\n-3.7,40.4,EA1\n")
     assert staged["candidate_count"] == 1
     reasons = rows(staged["id"])[0]["candidate_matches"][0]["reasons"]
     assert [reason["type"] for reason in reasons] == ["spatial_proximity"]

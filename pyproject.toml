@@ -27,7 +27,7 @@ dev = [
 include = ["app*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "publisher"]
 
 [tool.ruff]
 target-version = "py312"

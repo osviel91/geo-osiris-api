@@ -20,6 +20,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 client = TestClient(app)
+PUBLISH_HEADERS = {"Authorization": "Bearer publish-token"}
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +28,8 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -35,10 +37,43 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
+
+
+@pytest.fixture(autouse=True)
+def scoped_tokens(monkeypatch):
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_APPROVE_TOKEN", "approve-token")
+    monkeypatch.setenv("GEO_PUBLISH_TOKEN", "publish-token")
+
+
+def commit(import_id: str, status: str = "published"):
+    headers = {"Authorization": "Bearer test-token"}
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval-request",
+            headers=headers,
+            json={"status": status},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval",
+            headers={"Authorization": "Bearer approve-token"},
+            json={"decision": "approve"},
+        ).status_code
+        == 200
+    )
+    return client.post(
+        f"/api/v1/admin/imports/{import_id}/commit",
+        headers=PUBLISH_HEADERS,
+        json={"status": status},
+    )
 
 
 def test_persisted_layer_serializes_to_public_and_compatibility_geojson() -> None:
@@ -219,7 +254,7 @@ def test_external_ids_are_unique_per_layer_but_nullable() -> None:
 
 
 def test_admin_manages_and_archives_generic_radio_features(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     headers = {"Authorization": "Bearer test-token"}
     layer = client.post(
         "/api/v1/admin/layers",
@@ -282,7 +317,7 @@ def _freshness(layer_id: str) -> tuple[int, datetime | None]:
 
 
 def test_layer_freshness_tracks_published_data_only(monkeypatch) -> None:
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     headers = {"Authorization": "Bearer test-token"}
     layer_id = client.post(
         "/api/v1/admin/layers",
@@ -368,14 +403,7 @@ def test_layer_freshness_tracks_published_data_only(monkeypatch) -> None:
             "content": "longitude,latitude,callsign\n-3.9,40.6,FRESH-2\n",
         },
     ).json()
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{draft_import['id']}/commit",
-            headers=headers,
-            json={"status": "draft"},
-        ).status_code
-        == 200
-    )
+    assert commit(draft_import["id"], "draft").status_code == 200
     assert _freshness(layer_id)[0] == 3
 
     published_import = client.post(
@@ -388,21 +416,14 @@ def test_layer_freshness_tracks_published_data_only(monkeypatch) -> None:
             "content": "longitude,latitude,callsign\n-4.0,40.7,FRESH-3\n",
         },
     ).json()
-    assert (
-        client.post(
-            f"/api/v1/admin/imports/{published_import['id']}/commit",
-            headers=headers,
-            json={"status": "published"},
-        ).status_code
-        == 200
-    )
+    assert commit(published_import["id"]).status_code == 200
     assert _freshness(layer_id)[0] == 4
 
 
 def test_geojson_staging_validates_and_cancels_without_creating_features(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     headers = {"Authorization": "Bearer test-token"}
     layer = client.post(
         "/api/v1/admin/layers",
@@ -477,7 +498,7 @@ def test_geojson_staging_validates_and_cancels_without_creating_features(
 def test_csv_import_reports_candidates_then_commits_to_public_geojson(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     headers = {"Authorization": "Bearer test-token"}
     layer = client.post(
         "/api/v1/admin/layers",
@@ -519,7 +540,7 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
     assert (
         client.post(
             f"/api/v1/admin/imports/{candidates.json()['id']}/commit",
-            headers=headers,
+            headers=PUBLISH_HEADERS,
             json={"status": "published"},
         ).status_code
         == 409
@@ -535,11 +556,7 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
             "content": "longitude,latitude,callsign\n-3.8,40.5,DEMO-IMPORTED\n",
         },
     )
-    committed = client.post(
-        f"/api/v1/admin/imports/{clean.json()['id']}/commit",
-        headers=headers,
-        json={"status": "published"},
-    )
+    committed = commit(clean.json()["id"])
 
     assert committed.json()["status"] == "committed"
     public = client.get("/api/v1/layers/csv-staging").json()
@@ -553,7 +570,7 @@ def test_csv_import_reports_candidates_then_commits_to_public_geojson(
 
 
 def _managed_layer_with_feature(monkeypatch, headers, status="published"):
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
     layer = client.post(
         "/api/v1/admin/layers",
         headers=headers,

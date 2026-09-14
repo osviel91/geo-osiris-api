@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session
 
 import app.aemet  # noqa: F401
 from app.admin import (
+    get_admin_approval,
     get_admin_feature,
     get_admin_import,
     get_admin_layer,
     get_admin_source,
     import_row_read,
+    list_admin_approvals,
     list_admin_features,
     list_admin_import_rows,
     list_admin_imports,
@@ -24,7 +26,9 @@ from app.admin import (
 from app.database import get_session, is_ready
 from app.imports import (
     cancel_import,
-    commit_import,
+    create_approval_request,
+    decide_approval,
+    execute_approved_import,
     resolve_import_row,
     stage_import,
 )
@@ -50,6 +54,7 @@ from app.schemas import (
     AdminLayer,
     AdminLayerRead,
     AdminSourceRead,
+    ApprovalDecision,
     CompatibilityLayer,
     CompatibilityLayersResponse,
     ExternalSourceSummary,
@@ -57,6 +62,8 @@ from app.schemas import (
     FeatureWrite,
     GeoJSONFeatureCollection,
     GeoJSONFeatureCollectionPage,
+    ImportApprovalRead,
+    ImportApprovalSummary,
     ImportCommit,
     ImportCreate,
     ImportRowResolution,
@@ -70,7 +77,15 @@ from app.schemas import (
     StaticFeatureCollection,
     StaticFeatureProperties,
 )
-from app.security import require_admin
+from app.security import (
+    ADMIN,
+    PUBLISH,
+    READ,
+    STAGE,
+    require_actor,
+    require_approver,
+    require_scope,
+)
 from app.sources import sync_source
 
 logging.basicConfig(
@@ -182,7 +197,7 @@ def public_layer_features(
 @app.post(
     "/api/v1/admin/layers",
     response_model=AdminLayer,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_create_layer(
     payload: LayerCreate, session: Session = Depends(get_session)
@@ -196,7 +211,7 @@ def admin_create_layer(
 @app.patch(
     "/api/v1/admin/layers/{layer_id}",
     response_model=AdminLayer,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_update_layer(
     layer_id: uuid.UUID, payload: LayerUpdate, session: Session = Depends(get_session)
@@ -210,7 +225,7 @@ def admin_update_layer(
 @app.post(
     "/api/v1/admin/layers/{layer_id}/features",
     response_model=AdminFeature,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_create_feature(
     layer_id: uuid.UUID, payload: FeatureWrite, session: Session = Depends(get_session)
@@ -224,7 +239,7 @@ def admin_create_feature(
 @app.patch(
     "/api/v1/admin/features/{feature_id}",
     response_model=AdminFeature,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_update_feature(
     feature_id: uuid.UUID,
@@ -238,7 +253,7 @@ def admin_update_feature(
 
 
 @app.delete(
-    "/api/v1/admin/features/{feature_id}", dependencies=[Depends(require_admin)]
+    "/api/v1/admin/features/{feature_id}", dependencies=[Depends(require_scope(ADMIN))]
 )
 def admin_archive_feature(
     feature_id: uuid.UUID, session: Session = Depends(get_session)
@@ -249,7 +264,7 @@ def admin_archive_feature(
 @app.post(
     "/api/v1/admin/imports",
     response_model=ImportSummary,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_stage_import(
     payload: ImportCreate, session: Session = Depends(get_session)
@@ -260,7 +275,7 @@ def admin_stage_import(
 @app.get(
     "/api/v1/admin/layers",
     response_model=Page[AdminLayerRead],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_list_layers(
     limit: int = DEFAULT_LIMIT,
@@ -274,7 +289,7 @@ def admin_list_layers(
 @app.get(
     "/api/v1/admin/layers/{layer_id}",
     response_model=AdminLayerRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_get_layer(
     layer_id: uuid.UUID, session: Session = Depends(get_session)
@@ -285,7 +300,7 @@ def admin_get_layer(
 @app.get(
     "/api/v1/admin/layers/{layer_id}/features",
     response_model=Page[AdminFeatureRead],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_list_features(
     layer_id: uuid.UUID,
@@ -301,7 +316,7 @@ def admin_list_features(
 @app.get(
     "/api/v1/admin/features/{feature_id}",
     response_model=AdminFeatureRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_get_feature(
     feature_id: uuid.UUID, session: Session = Depends(get_session)
@@ -312,7 +327,7 @@ def admin_get_feature(
 @app.get(
     "/api/v1/admin/imports",
     response_model=Page[AdminImportRead],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_list_imports(
     layer_id: uuid.UUID | None = None,
@@ -327,7 +342,7 @@ def admin_list_imports(
 @app.get(
     "/api/v1/admin/imports/{import_id}",
     response_model=AdminImportRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_get_import(
     import_id: uuid.UUID, session: Session = Depends(get_session)
@@ -338,7 +353,7 @@ def admin_get_import(
 @app.get(
     "/api/v1/admin/imports/{import_id}/rows",
     response_model=Page[AdminImportRowRead],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_list_import_rows(
     import_id: uuid.UUID,
@@ -356,7 +371,7 @@ def admin_list_import_rows(
 @app.post(
     "/api/v1/admin/imports/{import_id}/rows/{row_number}/resolution",
     response_model=AdminImportRowRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(STAGE))],
 )
 def admin_resolve_import_row(
     import_id: uuid.UUID,
@@ -367,10 +382,63 @@ def admin_resolve_import_row(
     return import_row_read(resolve_import_row(session, import_id, row_number, payload))
 
 
+@app.post(
+    "/api/v1/admin/imports/{import_id}/approval-request",
+    response_model=ImportApprovalRead,
+)
+def admin_create_approval_request(
+    import_id: uuid.UUID,
+    payload: ImportCommit,
+    actor: str = Depends(require_actor(STAGE)),
+    session: Session = Depends(get_session),
+) -> ImportApprovalRead:
+    return create_approval_request(session, import_id, payload, actor)
+
+
+@app.post(
+    "/api/v1/admin/imports/{import_id}/approval",
+    response_model=ImportApprovalRead,
+)
+def admin_decide_approval(
+    import_id: uuid.UUID,
+    payload: ApprovalDecision,
+    actor: str = Depends(require_approver()),
+    session: Session = Depends(get_session),
+) -> ImportApprovalRead:
+    return decide_approval(session, import_id, payload, actor)
+
+
+@app.get(
+    "/api/v1/admin/approvals",
+    response_model=Page[ImportApprovalSummary],
+    dependencies=[Depends(require_scope(READ))],
+)
+def admin_list_approvals(
+    limit: int = DEFAULT_LIMIT,
+    cursor: str | None = None,
+    state: str | None = None,
+    import_id: uuid.UUID | None = None,
+    session: Session = Depends(get_session),
+) -> Page[ImportApprovalSummary]:
+    items, next_cursor = list_admin_approvals(session, state, import_id, limit, cursor)
+    return Page[ImportApprovalSummary](items=items, next_cursor=next_cursor)
+
+
+@app.get(
+    "/api/v1/admin/approvals/{approval_id}",
+    response_model=ImportApprovalSummary,
+    dependencies=[Depends(require_scope(READ))],
+)
+def admin_get_approval(
+    approval_id: uuid.UUID, session: Session = Depends(get_session)
+) -> ImportApprovalSummary:
+    return get_admin_approval(session, approval_id)
+
+
 @app.get(
     "/api/v1/admin/sources",
     response_model=Page[AdminSourceRead],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_list_sources(
     limit: int = DEFAULT_LIMIT,
@@ -384,7 +452,7 @@ def admin_list_sources(
 @app.get(
     "/api/v1/admin/sources/{source_id}",
     response_model=AdminSourceRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(READ))],
 )
 def admin_get_source(
     source_id: uuid.UUID, session: Session = Depends(get_session)
@@ -395,20 +463,21 @@ def admin_get_source(
 @app.post(
     "/api/v1/admin/imports/{import_id}/commit",
     response_model=AdminImportRead,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(PUBLISH))],
 )
 def admin_commit_import(
     import_id: uuid.UUID,
     payload: ImportCommit,
+    actor: str = Depends(require_actor(PUBLISH)),
     session: Session = Depends(get_session),
 ) -> AdminImportRead:
-    commit_import(session, import_id, payload)
+    execute_approved_import(session, import_id, payload, actor)
     return get_admin_import(session, import_id)
 
 
 @app.delete(
     "/api/v1/admin/imports/{import_id}",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(ADMIN))],
 )
 def admin_cancel_import(
     import_id: uuid.UUID, session: Session = Depends(get_session)
@@ -419,7 +488,7 @@ def admin_cancel_import(
 @app.post(
     "/api/v1/admin/sources/{source_id}/sync",
     response_model=ExternalSourceSummary,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_scope(ADMIN))],
 )
 def admin_sync_source(
     source_id: uuid.UUID, session: Session = Depends(get_session)

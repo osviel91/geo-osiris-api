@@ -27,7 +27,8 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -36,7 +37,7 @@ def empty_database():
 
 @pytest.fixture(autouse=True)
 def admin_token(monkeypatch):
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
 
 
 def create_layer(slug: str, mode: str = "managed", **overrides) -> dict:

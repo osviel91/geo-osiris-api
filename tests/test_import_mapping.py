@@ -15,6 +15,7 @@ pytestmark = pytest.mark.skipif(
 client = TestClient(app)
 
 HEADERS = {"Authorization": "Bearer test-token"}
+PUBLISH_HEADERS = {"Authorization": "Bearer publish-token"}
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,8 @@ def empty_database():
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE import_rows, imports, external_sources, feature_provenance, "
+                "TRUNCATE import_approvals, import_rows, imports, external_sources, "
+                "feature_provenance, "
                 "features, layers CASCADE"
             )
         )
@@ -31,7 +33,33 @@ def empty_database():
 
 @pytest.fixture(autouse=True)
 def admin_token(monkeypatch):
-    monkeypatch.setenv("ADMIN_API_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+    monkeypatch.setenv("GEO_APPROVE_TOKEN", "approve-token")
+    monkeypatch.setenv("GEO_PUBLISH_TOKEN", "publish-token")
+
+
+def commit(import_id: str, status: str = "published"):
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval-request",
+            headers=HEADERS,
+            json={"status": status},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/admin/imports/{import_id}/approval",
+            headers={"Authorization": "Bearer approve-token"},
+            json={"decision": "approve"},
+        ).status_code
+        == 200
+    )
+    return client.post(
+        f"/api/v1/admin/imports/{import_id}/commit",
+        headers=PUBLISH_HEADERS,
+        json={"status": status},
+    )
 
 
 def create_layer(slug: str, metadata: dict | None = None) -> dict:
@@ -136,11 +164,7 @@ def test_typed_csv_mapping_converts_primitives_and_is_reproducible() -> None:
         "enabled": True,
         "optional": None,
     }
-    committed = client.post(
-        f"/api/v1/admin/imports/{staged['id']}/commit",
-        headers=HEADERS,
-        json={"status": "published"},
-    )
+    committed = commit(staged["id"])
     assert committed.status_code == 200, committed.text
     assert committed.json()["mapping_version"] == "2"
     assert committed.json()["status"] == "committed"
@@ -202,11 +226,7 @@ def test_typed_numeric_identity_property_matches_existing_candidate() -> None:
         json={"resolution": "import_anyway"},
     )
     assert resolved.status_code == 200, resolved.text
-    committed = client.post(
-        f"/api/v1/admin/imports/{staged['id']}/commit",
-        headers=HEADERS,
-        json={"status": "published"},
-    )
+    committed = commit(staged["id"])
     assert committed.status_code == 200, committed.text
 
 
@@ -300,7 +320,7 @@ def test_csv_row_level_errors_do_not_abort_import() -> None:
 
     blocked = client.post(
         f"/api/v1/admin/imports/{staged['id']}/commit",
-        headers=HEADERS,
+        headers=PUBLISH_HEADERS,
         json={"status": "published"},
     )
     assert blocked.status_code == 409
