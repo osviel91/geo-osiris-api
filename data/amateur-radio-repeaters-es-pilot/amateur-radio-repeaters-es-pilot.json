@@ -1,0 +1,993 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.3008,
+          39.0248
+        ]
+      },
+      "properties": {
+        "callsign": "EA6VHF",
+        "name": null,
+        "service_type": "beacon",
+        "modes": [
+          "CW"
+        ],
+        "rx_frequency_mhz": 144.426,
+        "tx_frequency_mhz": null,
+        "offset_mhz": null,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JM09TA",
+        "municipality": "Sant Antoni de Portmany",
+        "province": "Balearic Islands",
+        "autonomous_region": "Balearic Islands",
+        "status": "unknown",
+        "operator": "URE Ibiza - 10W + omni",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 39.0248,
+        "longitude": 1.3008,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/balizas144_N.php",
+        "source_record_id": "balizas144_N.php:EA6VHF:144.4260"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "callsign": "EA7JYO",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 439.65,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -8.0,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BM",
+        "locator": null,
+        "municipality": "Roquetas De Mar",
+        "province": "Almeria",
+        "autonomous_region": null,
+        "status": "on-air",
+        "operator": "EA7JYO",
+        "notes": "Exact site coordinates are unavailable from RadioID; geometry is intentionally null and this record is not import-ready.",
+        "last_verified_at": "2026-09-13",
+        "latitude": null,
+        "longitude": null,
+        "source_name": "RadioID.net DMR repeater API",
+        "source_url": "https://radioid.net/api/dmr/repeater/?country=Spain",
+        "source_record_id": "650"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "callsign": "EA7JYO",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 439.65,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -8.0,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BM",
+        "locator": null,
+        "municipality": "Roquetas De Mar",
+        "province": "Almeria",
+        "autonomous_region": null,
+        "status": "on-air",
+        "operator": "EA7JYO",
+        "notes": "Exact site coordinates are unavailable from RadioID; geometry is intentionally null and this record is not import-ready.",
+        "last_verified_at": "2026-09-13",
+        "latitude": null,
+        "longitude": null,
+        "source_name": "RadioID.net DMR repeater API",
+        "source_url": "https://radioid.net/api/dmr/repeater/?country=Spain",
+        "source_record_id": "651"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -1.537099,
+          42.684013
+        ]
+      },
+      "properties": {
+        "callsign": "EC2E",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 439.35,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN92FQ",
+        "municipality": "Ibargoiti",
+        "province": null,
+        "autonomous_region": "Navarre",
+        "status": "unknown",
+        "operator": "URE Navarra",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.684013,
+        "longitude": -1.537099,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:EC2E:439.3500"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -2.6852777777778,
+          42.594722222222
+        ]
+      },
+      "properties": {
+        "callsign": "ED1YAB",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 145.725,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": 77.0,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN82PO",
+        "municipality": "Peñacerrada-Urizaharra",
+        "province": "Álava",
+        "autonomous_region": "Autonomous Community of the Basque Country",
+        "status": "unknown",
+        "operator": "Radio Club Rioja",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.594722222222,
+        "longitude": -2.6852777777778,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED1YAB:145.7250"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -5.5895491963311725,
+          42.8384238097993
+        ]
+      },
+      "properties": {
+        "callsign": "ED1YAZ",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM-N"
+        ],
+        "rx_frequency_mhz": 145.675,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": 88.5,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN72EU",
+        "municipality": "La Pola de Gordón",
+        "province": "León",
+        "autonomous_region": "Castile and León",
+        "status": "unknown",
+        "operator": "URE León",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.8384238097993,
+        "longitude": -5.5895491963311725,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED1YAZ:145.6750"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -5.686958,
+          40.344797
+        ]
+      },
+      "properties": {
+        "callsign": "ED1YBQ",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [],
+        "rx_frequency_mhz": 29.68,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.1,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN70DI",
+        "municipality": "Navacarros",
+        "province": "Salamanca",
+        "autonomous_region": "Castile and León",
+        "status": "unknown",
+        "operator": "Sierra de Bejar - La Covatilla Grupo Radiopaquete Salamanca",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 40.344797,
+        "longitude": -5.686958,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe28_N.php",
+        "source_record_id": "repe28_N.php:ED1YBQ:29.6800"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -7.61,
+          42.3497222222
+        ]
+      },
+      "properties": {
+        "callsign": "ED1ZBG",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "C4FM"
+        ],
+        "rx_frequency_mhz": 145.7125,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN62EI",
+        "municipality": "Parada de Sil",
+        "province": "Ourense",
+        "autonomous_region": "Galicia",
+        "status": "unknown",
+        "operator": "URE Ourense",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.3497222222,
+        "longitude": -7.61,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED1ZBG:145.7125"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -7.61055555556,
+          42.35
+        ]
+      },
+      "properties": {
+        "callsign": "ED1ZBG_C",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star"
+        ],
+        "rx_frequency_mhz": 145.6375,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN62EI",
+        "municipality": "Parada de Sil",
+        "province": "Ourense",
+        "autonomous_region": "Galicia",
+        "status": "unknown",
+        "operator": "URE Ourense",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.35,
+        "longitude": -7.61055555556,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED1ZBG_C:145.6375"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -5.534456330494542,
+          42.58118918049965
+        ]
+      },
+      "properties": {
+        "callsign": "ED1ZBJ",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 438.225,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BM",
+        "locator": "IN72FN",
+        "municipality": "Valdefresno",
+        "province": "León",
+        "autonomous_region": "Castile and León",
+        "status": "unknown",
+        "operator": "URE León",
+        "notes": " RadioID DMR enrichment: color code and network from identity_id 654; principal source remains URE. Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.58118918049965,
+        "longitude": -5.534456330494542,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED1ZBJ:438.2250"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -1.761667,
+          43.311333
+        ]
+      },
+      "properties": {
+        "callsign": "ED2ZAB",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star",
+          "FM"
+        ],
+        "rx_frequency_mhz": 145.775,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN83CH",
+        "municipality": "Irun",
+        "province": "Gipuzkoa",
+        "autonomous_region": "Autonomous Community of the Basque Country",
+        "status": "unknown",
+        "operator": "Radioaficionados del Bidasoa",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 43.311333,
+        "longitude": -1.761667,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED2ZAB:145.7750"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.8927780000000003,
+          42.321111
+        ]
+      },
+      "properties": {
+        "callsign": "ED3YAI",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 51.9,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": 88.5,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JN02WH",
+        "municipality": "Das",
+        "province": "Girona",
+        "autonomous_region": "Catalonia",
+        "status": "unknown",
+        "operator": "AMIRED",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 42.321111,
+        "longitude": 1.8927780000000003,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe50_N.php",
+        "source_record_id": "repe50_N.php:ED3YAI:51.9000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.116928,
+          41.383088
+        ]
+      },
+      "properties": {
+        "callsign": "ED3YAK",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star",
+          "FM"
+        ],
+        "rx_frequency_mhz": 145.65,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JN11BJ",
+        "municipality": "Barcelona",
+        "province": "Barcelona",
+        "autonomous_region": "Catalonia",
+        "status": "unknown",
+        "operator": "URE Barcelona",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 41.383088,
+        "longitude": 2.116928,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED3YAK:145.6500"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          3.033342,
+          41.800047000000006
+        ]
+      },
+      "properties": {
+        "callsign": "ED3ZAN",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 145.5875,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BM",
+        "locator": "JN12LG",
+        "municipality": "Sant Feliu de Guíxols",
+        "province": "Girona",
+        "autonomous_region": "Catalonia",
+        "status": "unknown",
+        "operator": "Sección URE Alt Empordá",
+        "notes": " RadioID DMR enrichment: color code and network from identity_id 730; principal source remains URE. Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 41.800047000000006,
+        "longitude": 3.033342,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED3ZAN:145.5875"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.116667,
+          40.683333
+        ]
+      },
+      "properties": {
+        "callsign": "ED4YAE",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 1298.5,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -28.0,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN70WR",
+        "municipality": "Guadarrama",
+        "province": null,
+        "autonomous_region": "Community of Madrid",
+        "status": "unknown",
+        "operator": "4 W potencia - URE Sierra de Guadarrama",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 40.683333,
+        "longitude": -4.116667,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe1200_N.php",
+        "source_record_id": "repe1200_N.php:ED4YAE:1298.5000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -3.6711358,
+          40.390701
+        ]
+      },
+      "properties": {
+        "callsign": "ED4YAG",
+        "name": null,
+        "service_type": "APRS digipeater",
+        "modes": [
+          "APRS"
+        ],
+        "rx_frequency_mhz": 144.8,
+        "tx_frequency_mhz": null,
+        "offset_mhz": null,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN80DJ",
+        "municipality": "Madrid",
+        "province": null,
+        "autonomous_region": "Community of Madrid",
+        "status": "unknown",
+        "operator": "URE Central",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 40.390701,
+        "longitude": -3.6711358,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED4YAG:144.8000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.116667,
+          40.683333
+        ]
+      },
+      "properties": {
+        "callsign": "ED4YAW",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 51.95,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": 88.5,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IN70WR",
+        "municipality": "Guadarrama",
+        "province": null,
+        "autonomous_region": "Community of Madrid",
+        "status": "unknown",
+        "operator": "Subtono: 88,5 Hz - URE Sierra de Guadarrama",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 40.683333,
+        "longitude": -4.116667,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe50_N.php",
+        "source_record_id": "repe50_N.php:ED4YAW:51.9500"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -3.705,
+          40.3327777778
+        ]
+      },
+      "properties": {
+        "callsign": "ED4ZAG",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 438.3,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.0076,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BM",
+        "locator": "IN80DH",
+        "municipality": "Madrid",
+        "province": null,
+        "autonomous_region": "Community of Madrid",
+        "status": "unknown",
+        "operator": "URE Alcorcón",
+        "notes": " RadioID DMR enrichment: color code and network from identity_id 659; principal source remains URE. Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 40.3327777778,
+        "longitude": -3.705,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED4ZAG:438.3000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          0.1075,
+          38.843056
+        ]
+      },
+      "properties": {
+        "callsign": "ED5ZAC",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star",
+          "FM"
+        ],
+        "rx_frequency_mhz": 145.6875,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JM08BU",
+        "municipality": "Dénia",
+        "province": "Alacant / Alicante",
+        "autonomous_region": "Valencian Community",
+        "status": "unknown",
+        "operator": "RC Denia",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 38.843056,
+        "longitude": 0.1075,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED5ZAC:145.6875"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          0.1075,
+          38.843056
+        ]
+      },
+      "properties": {
+        "callsign": "ED5ZAC",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star",
+          "FM"
+        ],
+        "rx_frequency_mhz": 1298.5,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -28.0,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JM08BU",
+        "municipality": "Dénia",
+        "province": "Alacant / Alicante",
+        "autonomous_region": "Valencian Community",
+        "status": "unknown",
+        "operator": "RC Denia",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 38.843056,
+        "longitude": 0.1075,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe1200_N.php",
+        "source_record_id": "repe1200_N.php:ED5ZAC:1298.5000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.713889,
+          39.737778
+        ]
+      },
+      "properties": {
+        "callsign": "ED6ZAC",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "D-Star",
+          "FM"
+        ],
+        "rx_frequency_mhz": 145.625,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "JM19IR",
+        "municipality": "Bunyola",
+        "province": "Balearic Islands",
+        "autonomous_region": "Balearic Islands",
+        "status": "unknown",
+        "operator": "Digigrup",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 39.737778,
+        "longitude": 2.713889,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED6ZAC:145.6250"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.805832,
+          37.963689
+        ]
+      },
+      "properties": {
+        "callsign": "ED7YAM",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 51.81,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -0.6,
+        "ctcss_hz": 77.0,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IM77OX",
+        "municipality": "Córdoba",
+        "province": "Córdoba",
+        "autonomous_region": "Andalusia",
+        "status": "unknown",
+        "operator": "URE Córdoba",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 37.963689,
+        "longitude": -4.805832,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe50_N.php",
+        "source_record_id": "repe50_N.php:ED7YAM:51.8100"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -5.9547084,
+          36.835635100000005
+        ]
+      },
+      "properties": {
+        "callsign": "ED7YAU",
+        "name": null,
+        "service_type": "APRS digipeater",
+        "modes": [
+          "APRS"
+        ],
+        "rx_frequency_mhz": 144.8,
+        "tx_frequency_mhz": null,
+        "offset_mhz": null,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IM76AT",
+        "municipality": "Jerez",
+        "province": "Cádiz",
+        "autonomous_region": "Andalusia",
+        "status": "unknown",
+        "operator": "30 W - Antena omnidireccional - URE San Fernando",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 36.835635100000005,
+        "longitude": -5.9547084,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe144_N.php",
+        "source_record_id": "repe144_N.php:ED7YAU:144.8000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -6.03987,
+          37.3465
+        ]
+      },
+      "properties": {
+        "callsign": "ED7ZAL",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "DMR"
+        ],
+        "rx_frequency_mhz": 438.425,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": null,
+        "dmr_color_code": 1,
+        "dmr_network": "BrandMeister",
+        "locator": "IM67XI",
+        "municipality": "Mairena del Aljarafe",
+        "province": "Sevilla",
+        "autonomous_region": "Andalusia",
+        "status": "unknown",
+        "operator": "URE Sevilla",
+        "notes": " RadioID DMR enrichment: color code and network from identity_id 803; principal source remains URE. Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 37.3465,
+        "longitude": -6.03987,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED7ZAL:438.4250"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -6.125789,
+          36.501792
+        ]
+      },
+      "properties": {
+        "callsign": "ED7ZAM",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "C4FM"
+        ],
+        "rx_frequency_mhz": 438.5,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IM66WM",
+        "municipality": "Puerto Real",
+        "province": "Cádiz",
+        "autonomous_region": "Andalusia",
+        "status": "unknown",
+        "operator": "URE San Fernando",
+        "notes": "RadioID record 649 matches callsign and frequency but reports DMR while URE reports C4FM; DMR metadata omitted pending manual review. Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 36.501792,
+        "longitude": -6.125789,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED7ZAM:438.5000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -17.825333,
+          28.647164
+        ]
+      },
+      "properties": {
+        "callsign": "ED8YAB",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [
+          "FM"
+        ],
+        "rx_frequency_mhz": 439.0,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": null,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IL18CP",
+        "municipality": "Breña Alta",
+        "province": "Santa Cruz de Tenerife",
+        "autonomous_region": "Canary Islands",
+        "status": "unknown",
+        "operator": "Unión Radioaficionados Aridane",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 28.647164,
+        "longitude": -17.825333,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED8YAB:439.0000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -5.355278,
+          35.899722
+        ]
+      },
+      "properties": {
+        "callsign": "ED9YAB",
+        "name": null,
+        "service_type": "repeater",
+        "modes": [],
+        "rx_frequency_mhz": 438.675,
+        "tx_frequency_mhz": null,
+        "offset_mhz": -7.6,
+        "ctcss_hz": 82.5,
+        "dmr_color_code": null,
+        "dmr_network": null,
+        "locator": "IM75IV",
+        "municipality": "Ceuta",
+        "province": null,
+        "autonomous_region": "Ceuta",
+        "status": "unknown",
+        "operator": "URE Sección Ceuta",
+        "notes": " Administrative areas derived from exact URE site coordinates using OpenStreetMap Nominatim.",
+        "last_verified_at": "2026-09-13",
+        "latitude": 35.899722,
+        "longitude": -5.355278,
+        "source_name": "URE repeater and beacon listings",
+        "source_url": "https://www.ure.es/appure/repetidores/repe432_N.php",
+        "source_record_id": "repe432_N.php:ED9YAB:438.6750"
+      }
+    }
+  ]
+}
