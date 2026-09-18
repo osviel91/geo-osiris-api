@@ -1,4 +1,5 @@
 import json
+import math
 import uuid
 from datetime import datetime
 from typing import Any
@@ -15,6 +16,10 @@ from app.schemas import (
     GeoJSONFeatureCollectionPage,
     LayerSummary,
 )
+
+DEFAULT_PRECISION = 9
+MAX_PRECISION = 9
+MAX_SIMPLIFY_DEGREES = 1.0
 
 
 def list_layers(session: Session) -> list[LayerSummary]:
@@ -88,6 +93,8 @@ def get_layer_features_page(
     cursor: str | None,
     bbox: str | None,
     updated_since: datetime | None,
+    precision: int = DEFAULT_PRECISION,
+    simplify: float = 0.0,
 ) -> GeoJSONFeatureCollectionPage:
     layer = session.scalar(
         select(Layer).where(Layer.slug == slug, Layer.enabled.is_(True))
@@ -95,14 +102,26 @@ def get_layer_features_page(
     if layer is None:
         raise HTTPException(status_code=404, detail="Layer not found")
 
+    if not isinstance(precision, int) or not 0 <= precision <= MAX_PRECISION:
+        raise HTTPException(status_code=422, detail="precision must be between 0 and 9")
+    if not math.isfinite(simplify) or not 0.0 <= simplify <= MAX_SIMPLIFY_DEGREES:
+        raise HTTPException(
+            status_code=422, detail="simplify must be between 0 and 1 degrees"
+        )
+
     limit = clamp_limit(limit)
     after = decode_cursor(cursor, {"id"})["id"] if cursor else None
+    # Presentation-only: the stored Feature.geometry is never modified. The
+    # spatial filter below still runs against the authoritative column.
+    geometry = Feature.geometry
+    if simplify > 0:
+        geometry = func.ST_SimplifyPreserveTopology(Feature.geometry, simplify)
     statement = select(
         Feature.id,
         Feature.properties,
         Feature.status,
         Feature.updated_at,
-        func.ST_AsGeoJSON(Feature.geometry).label("geometry_json"),
+        func.ST_AsGeoJSON(geometry, precision).label("geometry_json"),
     ).where(
         Feature.layer_id == layer.id,
         Feature.status == "published",

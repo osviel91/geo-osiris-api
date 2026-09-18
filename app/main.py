@@ -3,10 +3,11 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 
 import app.aemet  # noqa: F401
 import app.geojson_source  # noqa: F401
@@ -34,6 +35,9 @@ from app.imports import (
     stage_import,
 )
 from app.layers import (
+    DEFAULT_PRECISION,
+    MAX_PRECISION,
+    MAX_SIMPLIFY_DEGREES,
     get_layer_features_page,
     get_layer_geojson,
     list_compatibility_layers,
@@ -149,6 +153,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=[],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
 @app.get("/health")
@@ -190,9 +195,13 @@ def public_layer_features(
     cursor: str | None = None,
     bbox: str | None = None,
     updated_since: datetime | None = None,
+    precision: int = Query(DEFAULT_PRECISION, ge=0, le=MAX_PRECISION),
+    simplify: float = Query(0.0, ge=0.0, le=MAX_SIMPLIFY_DEGREES),
     session: Session = Depends(get_session),
 ) -> GeoJSONFeatureCollectionPage:
-    return get_layer_features_page(session, slug, limit, cursor, bbox, updated_since)
+    return get_layer_features_page(
+        session, slug, limit, cursor, bbox, updated_since, precision, simplify
+    )
 
 
 @app.post(

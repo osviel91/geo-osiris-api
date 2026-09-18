@@ -11,8 +11,8 @@ GeoJSON API and PostGIS-backed Geo Data Hub for OSIRIS. OSIRIS remains a read-on
 | `GET /layers` | Available layer metadata |
 | `GET /layers/test` | Static RFC 7946-style GeoJSON FeatureCollection |
 | `GET /api/v1/layers` | Enabled persistent-layer summaries |
-| `GET /api/v1/layers/{slug}` | Published persistent GeoJSON FeatureCollection |
-| `GET /api/v1/layers/{slug}/features` | Alias for the layer GeoJSON collection |
+| `GET /api/v1/layers/{slug}` | Whole published persistent GeoJSON FeatureCollection |
+| `GET /api/v1/layers/{slug}/features` | Bounded, paginated, viewport-filtered FeatureCollection page |
 
 Example response:
 
@@ -23,6 +23,25 @@ Example response:
 OpenAPI documentation is available at `/docs`.
 
 `/layers`, `/layers/test`, and their response shapes are retained for OSIRIS compatibility. The static `test` layer remains available if PostGIS is unavailable; persistent layers require `/ready` to be healthy.
+
+## Feature queries
+
+`GET /api/v1/layers/{slug}/features` delivers large layers in bounded pages and is the endpoint to use for map viewports. The whole-collection `GET /api/v1/layers/{slug}` is retained for authoritative reads.
+
+| Parameter | Default | Bounds | Effect |
+| --- | --- | --- | --- |
+| `bbox` | none | WGS84 `minLon,minLat,maxLon,maxLat` | Only features intersecting the box (GIST index) |
+| `limit` | 100 | 1–500 | Page size |
+| `cursor` | none | opaque | Keyset pagination; pass the previous `next_cursor` |
+| `updated_since` | none | ISO 8601 | Only features updated after the timestamp |
+| `precision` | 9 | 0–9 | `ST_AsGeoJSON` decimal digits |
+| `simplify` | 0 | 0–1 degrees | `ST_SimplifyPreserveTopology` tolerance; 0 disables |
+
+`precision` and `simplify` are visualization parameters: they affect only the serialized response and never mutate or persist geometry. `simplify` is expressed in WGS84 degrees. Responses are gzip-compressed when the client sends `Accept-Encoding: gzip`.
+
+```sh
+curl "https://<host>/api/v1/layers/protected-natural-areas-es/features?bbox=-3.85,40.30,-3.55,40.55&limit=500&precision=6&simplify=0.001"
+```
 
 ## Database and migrations
 
