@@ -1,15 +1,14 @@
-# File-backed Authelia users. Never commit a plaintext password.
+# Example Authelia users file. Copy to users_database.yml (git-ignored) and
+# replace the placeholder hash. Never commit a plaintext password or a real hash.
 #
 # Generate an Argon2 hash locally and paste it in place of the placeholder:
 #   docker run --rm -it authelia/authelia:4.38 \
 #     authelia crypto hash generate argon2
-#
-# The hash below is a one-way Argon2id digest; the plaintext is never stored.
 ---
 users:
   admin:
     displayname: "Geo Hub Admin"
-    password: '$argon2id$v=19$m=65536,t=3,p=4$Wv9p/AFNuLNABbzmbtFBRA$XE2rHafPQAHUwOHvBQQcfID5d3gs39xTsZ47lquT9GQ'
+    password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_WITH_GENERATED_HASH'
     email: "admin@osiris.home.arpa"
     groups:
       - admins

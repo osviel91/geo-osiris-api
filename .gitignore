@@ -10,4 +10,5 @@ __pycache__/
 dist/
 build/
 deploy/backups/
+deploy/staging/authelia/users_database.yml
 data/**/work/
