@@ -191,6 +191,7 @@ def _source_read(source: ExternalSource) -> AdminSourceRead:
         adapter=source.adapter,
         dataset_id=source.dataset_id,
         endpoint=source.endpoint,
+        adapter_config=source.adapter_config,
         enabled=source.enabled,
         status=source.status,
         last_attempt_at=source.last_attempt_at,

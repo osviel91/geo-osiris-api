@@ -228,6 +228,7 @@ class ExternalSourceSummary(BaseModel):
     slug: str
     adapter: str
     dataset_id: str
+    adapter_config: dict[str, Any]
     status: str
     last_attempt_at: datetime | None
     last_success_at: datetime | None
@@ -326,6 +327,7 @@ class AdminSourceRead(BaseModel):
     adapter: str
     dataset_id: str
     endpoint: str | None
+    adapter_config: dict[str, Any]
     enabled: bool
     status: str
     last_attempt_at: datetime | None

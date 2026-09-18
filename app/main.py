@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import app.aemet  # noqa: F401
+import app.geojson_source  # noqa: F401
 from app.admin import (
     get_admin_approval,
     get_admin_feature,
@@ -500,6 +501,7 @@ def admin_sync_source(
         slug=source.slug,
         adapter=source.adapter,
         dataset_id=source.dataset_id,
+        adapter_config=source.adapter_config,
         status=source.status,
         last_attempt_at=source.last_attempt_at,
         last_success_at=source.last_success_at,

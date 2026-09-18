@@ -48,6 +48,29 @@ CSV mapping v2 uses `{ "column", "type" }` property entries. Supported types are
 {"properties":{"modes":{"column":"modes","type":"json"},"rx_frequency_mhz":{"column":"rx_frequency_mhz","type":"number"}}}
 ```
 
+## External GeoJSON sources
+
+The `geojson` adapter imports a public HTTPS RFC 7946 FeatureCollection through
+the existing idempotent source-sync path. Its per-source `adapter_config` is
+stored on `external_sources`, keeping source behavior separate from layer
+presentation and lifecycle state:
+
+```json
+{"id_property":"station_id","properties":{"name":"label","kind":"type"},"timeout_seconds":60}
+```
+
+`id_property` selects a source property for the stable external ID; omit it to
+use the GeoJSON Feature `id`. `properties` is an explicit output-to-source
+property map, so unlisted upstream fields are not published. `timeout_seconds`
+is optional, defaults to 20 and must be between 1 and 120. The source must be
+disabled before a later lifecycle action removes its external layer; a disabled
+source cannot silently recreate its features during sync.
+
+The seeded `miteco-protected-natural-areas` source uses the generic adapter for
+the official IEPNB/MITECO WFS GeoJSON FeatureCollection. Its layer metadata
+records the required MITECO/IEPNB attribution and reuse-by-citation notice; the
+upstream service publishes no dataset-specific SPDX or CC identifier.
+
 ## Local development
 
 ```sh

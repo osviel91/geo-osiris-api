@@ -206,6 +206,113 @@ def test_external_sync_updates_layer_revision(monkeypatch) -> None:
         ADAPTERS.pop("freshness-fixture", None)
 
 
+def test_external_sync_updates_archives_and_reactivates_without_duplicates(
+    monkeypatch,
+) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "one",
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"name": "Original"},
+            },
+            {
+                "id": "two",
+                "geometry": {"type": "Point", "coordinates": [-3.8, 40.5]},
+                "properties": {"name": "To archive"},
+            },
+        ]
+    )
+    register_adapter("reconcile-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-reconcile",
+                name="External reconcile",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-reconcile",
+                adapter="reconcile-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id, layer_id = source.id, layer.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+        headers = {"Authorization": "Bearer test-token"}
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            original_ids = {
+                feature.external_id: feature.id
+                for feature in session.scalars(select(Feature)).all()
+            }
+
+        adapter.records = [
+            {
+                "id": "one",
+                "geometry": {"type": "Point", "coordinates": [-3.6, 40.3]},
+                "properties": {"name": "Updated"},
+            },
+            {
+                "id": "three",
+                "geometry": {"type": "Point", "coordinates": [-3.9, 40.6]},
+                "properties": {"name": "New"},
+            },
+        ]
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            features = {
+                feature.external_id: feature
+                for feature in session.scalars(select(Feature)).all()
+            }
+            assert len(features) == 3
+            assert features["one"].id == original_ids["one"]
+            assert features["one"].properties["name"] == "Updated"
+            assert features["two"].status == "archived"
+
+        adapter.records.append(
+            {
+                "id": "two",
+                "geometry": {"type": "Point", "coordinates": [-3.8, 40.5]},
+                "properties": {"name": "Reappeared"},
+            }
+        )
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            features = {
+                feature.external_id: feature
+                for feature in session.scalars(select(Feature)).all()
+            }
+            assert len(features) == 3
+            assert features["two"].id == original_ids["two"]
+            assert features["two"].status == "published"
+            assert features["two"].archived_at is None
+            layer = session.get(Layer, layer_id)
+            source = session.get(ExternalSource, source_id)
+            assert layer is not None and source is not None
+            layer.enabled = False
+            session.commit()
+
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            source = session.get(ExternalSource, source_id)
+            assert source is not None
+            source.enabled = False
+            session.commit()
+        assert client.post(endpoint, headers=headers).status_code == 409
+    finally:
+        ADAPTERS.pop("reconcile-fixture", None)
+
+
 def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(
     monkeypatch,
 ) -> None:
@@ -324,3 +431,134 @@ def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(
         ]
         == "ZARAGOZA"
     )
+
+
+def test_external_sync_updates_geometry_only_change(monkeypatch) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "station-1",
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"name": "Same"},
+            }
+        ]
+    )
+    register_adapter("geometry-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-geometry",
+                name="External geometry",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-geometry",
+                adapter="geometry-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id, layer_id = source.id, layer.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+        headers = {"Authorization": "Bearer test-token"}
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            original = session.scalar(select(Feature))
+            assert original is not None
+            original_id = original.id
+
+        adapter.records = [
+            {
+                "id": "station-1",
+                "geometry": {"type": "Point", "coordinates": [-3.9, 40.6]},
+                "properties": {"name": "Same"},
+            }
+        ]
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+        with Session(engine) as session:
+            feature = session.scalar(
+                select(Feature).where(Feature.layer_id == layer_id)
+            )
+            assert feature is not None
+            assert feature.id == original_id
+            assert len(feature.provenance_records) == 2
+        assert client.get("/api/v1/layers/external-geometry").json()["features"][0][
+            "geometry"
+        ]["coordinates"] == [-3.9, 40.6]
+    finally:
+        ADAPTERS.pop("geometry-fixture", None)
+
+
+def test_external_sync_rejects_duplicate_ids_and_preserves_last_good(
+    monkeypatch,
+) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "one",
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"name": "Original"},
+            }
+        ]
+    )
+    register_adapter("duplicate-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-duplicate",
+                name="External duplicate",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-duplicate",
+                adapter="duplicate-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id, layer_id = source.id, layer.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+        headers = {"Authorization": "Bearer test-token"}
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+
+        adapter.records = [
+            {
+                "id": "one",
+                "geometry": {"type": "Point", "coordinates": [-3.7, 40.4]},
+                "properties": {"name": "Original"},
+            },
+            {
+                "id": "one",
+                "geometry": {"type": "Point", "coordinates": [-3.8, 40.5]},
+                "properties": {"name": "Duplicate"},
+            },
+        ]
+        failed = client.post(endpoint, headers=headers).json()
+        assert failed["status"] == "failed"
+        assert "duplicate" in failed["last_error"]
+        with Session(engine) as session:
+            features = list(
+                session.scalars(select(Feature).where(Feature.layer_id == layer_id))
+            )
+            assert len(features) == 1
+            assert features[0].status == "published"
+            assert features[0].properties["name"] == "Original"
+            assert len(features[0].provenance_records) == 1
+    finally:
+        ADAPTERS.pop("duplicate-fixture", None)
