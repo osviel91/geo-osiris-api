@@ -233,6 +233,52 @@ class ExternalSourceSummary(BaseModel):
     last_attempt_at: datetime | None
     last_success_at: datetime | None
     last_error: str | None
+    agent_managed: bool = False
+
+
+class AgentSourceProposal(BaseModel):
+    endpoint: str
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,99}$")
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    category: str = Field(max_length=50)
+    geometry_types: list[str] = Field(min_length=1)
+    dataset_id: str = Field(min_length=1, max_length=200)
+    id_property: str | None = Field(default=None, max_length=100)
+    properties: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: int = Field(default=20, ge=1, le=60)
+    attribution: str | None = Field(default=None, max_length=500)
+    license: str | None = Field(default=None, max_length=200)
+
+
+class AgentSourceCreate(BaseModel):
+    proposal: AgentSourceProposal
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentSourceValidation(BaseModel):
+    proposal: AgentSourceProposal
+    summary: dict[str, Any]
+    warnings: list[str]
+    fingerprint: str
+
+
+class AgentSourceSync(BaseModel):
+    source_id: str
+    source_slug: str
+    layer_id: str
+    layer_slug: str
+    status: str
+    created: int
+    updated: int
+    archived: int
+    unchanged: int
+    reactivated: int
+    duration_ms: int
+    attempted_at: datetime
+    completed_at: datetime
+    error: str | None = None
+    warnings: list[str] = []
 
 
 class AdminLayerRead(BaseModel):
@@ -353,3 +399,4 @@ class AdminSourceRead(BaseModel):
     last_attempt_at: datetime | None
     last_success_at: datetime | None
     last_error: str | None
+    agent_managed: bool = False

@@ -245,6 +245,7 @@ class ExternalSource(Base):
     endpoint: Mapped[str | None] = mapped_column(Text)
     adapter_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
+    agent_managed: Mapped[bool] = mapped_column(default=False, server_default="false")
     status: Mapped[str] = mapped_column(String(20), default="never")
     last_attempt_at: Mapped[datetime | None]
     last_success_at: Mapped[datetime | None]

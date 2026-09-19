@@ -40,6 +40,13 @@ def register_adapter(name: str, adapter: SourceAdapter) -> None:
 
 
 def sync_source(session: Session, source_id: uuid.UUID) -> ExternalSource:
+    source, _ = sync_source_report(session, source_id)
+    return source
+
+
+def sync_source_report(
+    session: Session, source_id: uuid.UUID
+) -> tuple[ExternalSource, dict[str, int]]:
     source = session.scalar(
         select(ExternalSource)
         .where(ExternalSource.id == source_id)
@@ -64,23 +71,29 @@ def sync_source(session: Session, source_id: uuid.UUID) -> ExternalSource:
         with session.begin_nested():
             records = adapter.fetch(source)
             normalized = [adapter.normalize(record, source) for record in records]
-            _reconcile(session, source, normalized)
+            counts = _reconcile(session, source, normalized)
     except Exception as error:
         source.status = "failed"
         source.last_error = str(error)[:2_000]
         session.commit()
-        return source
+        return source, {
+            "created": 0,
+            "updated": 0,
+            "archived": 0,
+            "unchanged": 0,
+            "reactivated": 0,
+        }
 
     source.status = "success"
     source.last_success_at = datetime.now(UTC)
     source.last_error = None
     session.commit()
-    return source
+    return source, counts
 
 
 def _reconcile(
     session: Session, source: ExternalSource, records: list[NormalizedFeature]
-) -> None:
+) -> dict[str, int]:
     incoming = {record.external_id: record for record in records}
     if len(incoming) != len(records):
         raise ValueError("Upstream source contains duplicate record IDs")
@@ -107,6 +120,13 @@ def _reconcile(
                 f"External record ID '{external_id}' conflicts with a feature "
                 "not owned by this source"
             )
+    counts = {
+        "created": 0,
+        "updated": 0,
+        "archived": 0,
+        "unchanged": 0,
+        "reactivated": 0,
+    }
     data_changed = False
     for external_id, record in incoming.items():
         previous = owned.pop(external_id, None)
@@ -121,6 +141,7 @@ def _reconcile(
             session.add(feature)
             _provenance(feature, source, record)
             data_changed = True
+            counts["created"] += 1
             continue
         feature = previous
         changed = (
@@ -131,6 +152,7 @@ def _reconcile(
             or feature.status != "published"
             or feature.archived_at is not None
         )
+        was_archived = previous.archived_at is not None or previous.status == "archived"
         if changed:
             feature.geometry = _geometry(record.geometry)
             feature.properties = record.properties
@@ -138,13 +160,18 @@ def _reconcile(
             feature.archived_at = None
             _provenance(feature, source, record)
             data_changed = True
+            counts["reactivated" if was_archived else "updated"] += 1
+        else:
+            counts["unchanged"] += 1
     for feature in owned.values():
         if feature.archived_at is None:
             feature.status = "archived"
             feature.archived_at = datetime.now(UTC)
             data_changed = True
+            counts["archived"] += 1
     if data_changed:
         touch_layer_data(session, source.layer_id)
+    return counts
 
 
 def _owned_by_source(feature: Feature, source: ExternalSource) -> bool:

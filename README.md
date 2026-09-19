@@ -81,9 +81,19 @@ presentation and lifecycle state:
 `id_property` selects a source property for the stable external ID; omit it to
 use the GeoJSON Feature `id`. `properties` is an explicit output-to-source
 property map, so unlisted upstream fields are not published. `timeout_seconds`
-is optional, defaults to 20 and must be between 1 and 120. The source must be
+is optional, defaults to 20 and must be between 1 and 60. The source must be
 disabled before a later lifecycle action removes its external layer; a disabled
 source cannot silently recreate its features during sync.
+
+Agent-managed source proposals use the scoped `geo.stage` endpoints
+`POST /api/v1/admin/agent/sources/validate` and `POST /api/v1/admin/agent/sources`.
+Validation performs a bounded HTTPS fetch, SSRF checks, GeoJSON limits, and returns
+a SHA-256 fingerprint. Creation re-fetches and compares that fingerprint, then creates
+the external layer and source disabled. `POST /api/v1/admin/agent/sources/{id}/sync`
+is limited to those sources, requires an enabled source, is explicit, and never enables
+the layer or performs destructive lifecycle actions. DNS is checked before fetch but is
+not pinned to the TLS connection; deployments requiring protection from DNS rebinding
+must add network-level egress controls or a pinned HTTP client.
 
 The seeded `miteco-protected-natural-areas` source uses the generic adapter for
 the official IEPNB/MITECO WFS GeoJSON FeatureCollection. Its layer metadata

@@ -200,6 +200,7 @@ def _source_read(source: ExternalSource) -> AdminSourceRead:
         last_attempt_at=source.last_attempt_at,
         last_success_at=source.last_success_at,
         last_error=source.last_error,
+        agent_managed=source.agent_managed,
     )
 
 

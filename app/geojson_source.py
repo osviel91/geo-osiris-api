@@ -1,13 +1,12 @@
-import json
 from typing import Any
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 
+from app.agent_sources import validate_dataset
 from app.models import ExternalSource
 from app.sources import NormalizedFeature, register_adapter
 
 DEFAULT_TIMEOUT_SECONDS = 20
-MAX_TIMEOUT_SECONDS = 120
+MAX_TIMEOUT_SECONDS = 60
 
 
 class GeoJSONAdapter:
@@ -21,6 +20,15 @@ class GeoJSONAdapter:
             or not all(isinstance(feature, dict) for feature in payload["features"])
         ):
             raise ValueError("GeoJSON source must return a FeatureCollection")
+        if source.layer is not None:
+            validate_dataset(
+                {
+                    "id_property": _config(source)["id_property"],
+                    "properties": _config(source)["properties"],
+                    "geometry_types": source.layer.geometry_types,
+                },
+                payload,
+            )
         return payload["features"]
 
     def normalize(
@@ -55,11 +63,15 @@ class GeoJSONAdapter:
 
 
 def _endpoint(source: ExternalSource) -> str:
-    if not source.endpoint:
+    if not source.endpoint or len(source.endpoint) > 2_000:
         raise ValueError("GeoJSON source endpoint is required")
     parts = urlsplit(source.endpoint)
-    if parts.scheme != "https" or not parts.hostname:
-        raise ValueError("GeoJSON source endpoint must be HTTPS")
+    if parts.scheme != "https" or parts.port not in (None, 443) or not parts.hostname:
+        raise ValueError("GeoJSON source endpoint must use HTTPS on port 443")
+    if parts.username or parts.password or parts.fragment:
+        raise ValueError(
+            "GeoJSON source endpoint cannot contain credentials or fragments"
+        )
     return source.endpoint
 
 
@@ -94,11 +106,10 @@ def _config(source: ExternalSource) -> dict[str, Any]:
 
 
 def _request_json(url: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> Any:
-    request = Request(url, headers={"Accept": "application/geo+json, application/json"})
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310
-        return json.loads(
-            response.read().decode(response.headers.get_content_charset() or "utf-8")
-        )
+    from app.agent_sources import fetch_dataset
+
+    payload, _ = fetch_dataset(url, timeout)
+    return payload
 
 
 register_adapter("geojson", GeoJSONAdapter())

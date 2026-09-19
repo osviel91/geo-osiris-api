@@ -1,10 +1,12 @@
 import logging
 import os
+import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
@@ -25,6 +27,7 @@ from app.admin import (
     list_admin_layers,
     list_admin_sources,
 )
+from app.agent_sources import preflight
 from app.database import get_session, is_ready
 from app.imports import (
     cancel_import,
@@ -52,6 +55,7 @@ from app.lifecycle import (
     enable_layer,
     enable_source,
     hard_delete_feature,
+    record_event,
     restore_feature,
 )
 from app.managed import (
@@ -60,7 +64,7 @@ from app.managed import (
     patch_feature,
     update_layer,
 )
-from app.models import ExternalSource
+from app.models import ExternalSource, Layer
 from app.pagination import DEFAULT_LIMIT
 from app.schemas import (
     AdminFeature,
@@ -70,6 +74,10 @@ from app.schemas import (
     AdminLayer,
     AdminLayerRead,
     AdminSourceRead,
+    AgentSourceCreate,
+    AgentSourceProposal,
+    AgentSourceSync,
+    AgentSourceValidation,
     ApprovalDecision,
     CascadeLayerDelete,
     CompatibilityLayer,
@@ -105,7 +113,7 @@ from app.security import (
     require_approver,
     require_scope,
 )
-from app.sources import sync_source
+from app.sources import sync_source, sync_source_report
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -167,6 +175,7 @@ def _source_summary(source: ExternalSource) -> ExternalSourceSummary:
         last_attempt_at=source.last_attempt_at,
         last_success_at=source.last_success_at,
         last_error=source.last_error,
+        agent_managed=source.agent_managed,
     )
 
 
@@ -637,6 +646,163 @@ def admin_get_source(
     source_id: uuid.UUID, session: Session = Depends(get_session)
 ) -> AdminSourceRead:
     return get_admin_source(session, source_id)
+
+
+def _agent_validation(proposal: AgentSourceProposal) -> AgentSourceValidation:
+    try:
+        result = preflight(proposal.model_dump(exclude_none=True))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return AgentSourceValidation(
+        proposal=result.proposal,
+        summary=result.summary,
+        warnings=result.warnings,
+        fingerprint=result.fingerprint,
+    )
+
+
+@app.post(
+    "/api/v1/admin/agent/sources/validate",
+    response_model=AgentSourceValidation,
+    dependencies=[Depends(require_scope(STAGE))],
+)
+def agent_validate_source(proposal: AgentSourceProposal) -> AgentSourceValidation:
+    return _agent_validation(proposal)
+
+
+@app.post(
+    "/api/v1/admin/agent/sources",
+    response_model=ExternalSourceSummary,
+    status_code=201,
+    dependencies=[Depends(require_scope(STAGE))],
+)
+def agent_create_source(
+    payload: AgentSourceCreate,
+    actor: str = Depends(require_actor(STAGE)),
+    session: Session = Depends(get_session),
+) -> ExternalSourceSummary:
+    validation = _agent_validation(payload.proposal)
+    if validation.fingerprint != payload.fingerprint:
+        raise HTTPException(
+            status_code=409, detail="Source dataset changed; fingerprint is stale"
+        )
+    proposal = validation.proposal
+    if session.scalar(select(Layer).where(Layer.slug == proposal.slug)) is not None:
+        raise HTTPException(status_code=409, detail="Layer slug already exists")
+    if (
+        session.scalar(
+            select(ExternalSource).where(ExternalSource.slug == proposal.slug)
+        )
+        is not None
+    ):
+        raise HTTPException(status_code=409, detail="Source slug already exists")
+    layer = Layer(
+        slug=proposal.slug,
+        name=proposal.name,
+        description=proposal.description,
+        category=proposal.category,
+        mode="external",
+        geometry_types=proposal.geometry_types,
+        enabled=False,
+        metadata_={
+            "agent_managed": True,
+            **({"attribution": proposal.attribution} if proposal.attribution else {}),
+            **({"license": proposal.license} if proposal.license else {}),
+        },
+    )
+    source = ExternalSource(
+        layer=layer,
+        slug=proposal.slug,
+        adapter="geojson",
+        dataset_id=proposal.dataset_id,
+        endpoint=proposal.endpoint,
+        adapter_config={
+            "id_property": proposal.id_property,
+            "properties": proposal.properties,
+            "timeout_seconds": proposal.timeout_seconds,
+            "fingerprint": validation.fingerprint,
+        },
+        enabled=False,
+        agent_managed=True,
+    )
+    session.add_all([layer, source])
+    try:
+        session.flush()
+        record_event(
+            session,
+            entity_type="source",
+            entity_id=source.id,
+            action="agent_source_created",
+            actor=actor,
+            previous_state={},
+            resulting_state={
+                "source_id": str(source.id),
+                "layer_id": str(layer.id),
+                "enabled": False,
+            },
+            metadata={"fingerprint": validation.fingerprint},
+        )
+        session.commit()
+    except Exception as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=409, detail="Could not create agent source"
+        ) from error
+    return _source_summary(source)
+
+
+@app.post(
+    "/api/v1/admin/agent/sources/{source_id}/sync",
+    response_model=AgentSourceSync,
+    dependencies=[Depends(require_scope(STAGE))],
+)
+def agent_sync_source(
+    source_id: uuid.UUID,
+    actor: str = Depends(require_actor(STAGE)),
+    session: Session = Depends(get_session),
+) -> AgentSourceSync:
+    source = session.scalar(
+        select(ExternalSource).where(ExternalSource.id == source_id)
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="External source not found")
+    if not source.agent_managed or source.adapter != "geojson":
+        raise HTTPException(status_code=403, detail="Source is not agent-managed")
+    if not source.enabled:
+        raise HTTPException(status_code=409, detail="External source is disabled")
+    now = datetime.now(UTC)
+    if source.last_attempt_at and now - source.last_attempt_at < timedelta(seconds=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Agent source sync must be at least 60 seconds apart",
+        )
+    started = time.monotonic()
+    attempted_at = now
+    source, counts = sync_source_report(session, source_id)
+    completed_at = datetime.now(UTC)
+    record_event(
+        session,
+        entity_type="source",
+        entity_id=source.id,
+        action="agent_source_sync",
+        actor=actor,
+        previous_state={"status": source.status},
+        resulting_state={"status": source.status, **counts},
+        metadata={"layer_id": str(source.layer_id)},
+    )
+    session.commit()
+    return AgentSourceSync(
+        source_id=str(source.id),
+        source_slug=source.slug,
+        layer_id=str(source.layer_id),
+        layer_slug=source.layer.slug,
+        status=source.status,
+        **counts,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        attempted_at=attempted_at,
+        completed_at=completed_at,
+        error=source.last_error,
+    )
 
 
 @app.post(
