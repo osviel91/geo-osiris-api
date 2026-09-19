@@ -43,13 +43,24 @@ from app.layers import (
     list_compatibility_layers,
     list_layers,
 )
-from app.managed import (
+from app.lifecycle import (
     archive_feature,
+    cascade_delete_layer,
+    delete_empty_layer,
+    disable_layer,
+    disable_source,
+    enable_layer,
+    enable_source,
+    hard_delete_feature,
+    restore_feature,
+)
+from app.managed import (
     create_feature,
     create_layer,
     patch_feature,
     update_layer,
 )
+from app.models import ExternalSource
 from app.pagination import DEFAULT_LIMIT
 from app.schemas import (
     AdminFeature,
@@ -60,8 +71,11 @@ from app.schemas import (
     AdminLayerRead,
     AdminSourceRead,
     ApprovalDecision,
+    CascadeLayerDelete,
     CompatibilityLayer,
     CompatibilityLayersResponse,
+    EmptyLayerDelete,
+    ExternalFeatureDelete,
     ExternalSourceSummary,
     FeaturePatch,
     FeatureWrite,
@@ -138,6 +152,23 @@ TEST_FEATURES = [
         ),
     ),
 ]
+
+
+def _source_summary(source: ExternalSource) -> ExternalSourceSummary:
+    return ExternalSourceSummary(
+        id=str(source.id),
+        layer_id=str(source.layer_id),
+        slug=source.slug,
+        adapter=source.adapter,
+        dataset_id=source.dataset_id,
+        adapter_config=source.adapter_config,
+        enabled=source.enabled,
+        status=source.status,
+        last_attempt_at=source.last_attempt_at,
+        last_success_at=source.last_success_at,
+        last_error=source.last_error,
+    )
+
 
 origins = [
     origin.strip()
@@ -266,9 +297,147 @@ def admin_update_feature(
     "/api/v1/admin/features/{feature_id}", dependencies=[Depends(require_scope(ADMIN))]
 )
 def admin_archive_feature(
-    feature_id: uuid.UUID, session: Session = Depends(get_session)
+    feature_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
 ) -> None:
-    archive_feature(session, feature_id)
+    archive_feature(session, feature_id, actor, managed_only=True)
+
+
+@app.post(
+    "/api/v1/admin/features/{feature_id}/archive",
+    response_model=AdminFeature,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_lifecycle_archive_feature(
+    feature_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> AdminFeature:
+    feature = archive_feature(session, feature_id, actor)
+    return AdminFeature(
+        id=str(feature.id), layer_id=str(feature.layer_id), status=feature.status
+    )
+
+
+@app.post(
+    "/api/v1/admin/features/{feature_id}/restore",
+    response_model=AdminFeature,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_restore_feature(
+    feature_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> AdminFeature:
+    feature = restore_feature(session, feature_id, actor)
+    return AdminFeature(
+        id=str(feature.id), layer_id=str(feature.layer_id), status=feature.status
+    )
+
+
+@app.post(
+    "/api/v1/admin/features/{feature_id}/hard-delete",
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_hard_delete_feature(
+    feature_id: uuid.UUID,
+    payload: ExternalFeatureDelete,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> None:
+    hard_delete_feature(
+        session,
+        feature_id,
+        actor,
+        confirm_recreated_on_sync=payload.confirm_recreated_on_sync,
+    )
+
+
+@app.post(
+    "/api/v1/admin/layers/{layer_id}/disable",
+    response_model=AdminLayer,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_disable_layer(
+    layer_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> AdminLayer:
+    layer = disable_layer(session, layer_id, actor)
+    return AdminLayer(
+        id=str(layer.id), slug=layer.slug, name=layer.name, mode=layer.mode
+    )
+
+
+@app.post(
+    "/api/v1/admin/layers/{layer_id}/enable",
+    response_model=AdminLayer,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_enable_layer(
+    layer_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> AdminLayer:
+    layer = enable_layer(session, layer_id, actor)
+    return AdminLayer(
+        id=str(layer.id), slug=layer.slug, name=layer.name, mode=layer.mode
+    )
+
+
+@app.delete(
+    "/api/v1/admin/layers/{layer_id}",
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_delete_empty_layer(
+    layer_id: uuid.UUID,
+    payload: EmptyLayerDelete,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> None:
+    delete_empty_layer(session, layer_id, actor, payload.confirmation)
+
+
+@app.post(
+    "/api/v1/admin/layers/{layer_id}/cascade-delete",
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_cascade_delete_layer(
+    layer_id: uuid.UUID,
+    payload: CascadeLayerDelete,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> None:
+    cascade_delete_layer(session, layer_id, actor, payload.confirmation)
+
+
+@app.post(
+    "/api/v1/admin/sources/{source_id}/disable",
+    response_model=ExternalSourceSummary,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_disable_source(
+    source_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> ExternalSourceSummary:
+    source = disable_source(session, source_id, actor)
+    return _source_summary(source)
+
+
+@app.post(
+    "/api/v1/admin/sources/{source_id}/enable",
+    response_model=ExternalSourceSummary,
+    dependencies=[Depends(require_scope(ADMIN))],
+)
+def admin_enable_source(
+    source_id: uuid.UUID,
+    actor: str = Depends(require_actor(ADMIN)),
+    session: Session = Depends(get_session),
+) -> ExternalSourceSummary:
+    source = enable_source(session, source_id, actor)
+    return _source_summary(source)
 
 
 @app.post(
@@ -504,18 +673,7 @@ def admin_sync_source(
     source_id: uuid.UUID, session: Session = Depends(get_session)
 ) -> ExternalSourceSummary:
     source = sync_source(session, source_id)
-    return ExternalSourceSummary(
-        id=str(source.id),
-        layer_id=str(source.layer_id),
-        slug=source.slug,
-        adapter=source.adapter,
-        dataset_id=source.dataset_id,
-        adapter_config=source.adapter_config,
-        status=source.status,
-        last_attempt_at=source.last_attempt_at,
-        last_success_at=source.last_success_at,
-        last_error=source.last_error,
-    )
+    return _source_summary(source)
 
 
 @app.get("/layers", response_model=CompatibilityLayersResponse)

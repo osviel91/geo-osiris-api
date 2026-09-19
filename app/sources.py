@@ -90,12 +90,26 @@ def _reconcile(
     existing = {
         feature.external_id: feature
         for feature in session.scalars(
-            select(Feature).where(Feature.layer_id == source.layer_id)
+            select(Feature)
+            .where(Feature.layer_id == source.layer_id)
+            .options(selectinload(Feature.provenance_records))
         )
     }
+    owned = {
+        external_id: feature
+        for external_id, feature in existing.items()
+        if _owned_by_source(feature, source)
+    }
+    for external_id in incoming:
+        previous = existing.get(external_id)
+        if previous is not None and not _owned_by_source(previous, source):
+            raise ValueError(
+                f"External record ID '{external_id}' conflicts with a feature "
+                "not owned by this source"
+            )
     data_changed = False
     for external_id, record in incoming.items():
-        previous = existing.pop(external_id, None)
+        previous = owned.pop(external_id, None)
         if previous is None:
             feature = Feature(
                 layer_id=source.layer_id,
@@ -124,13 +138,21 @@ def _reconcile(
             feature.archived_at = None
             _provenance(feature, source, record)
             data_changed = True
-    for feature in existing.values():
+    for feature in owned.values():
         if feature.archived_at is None:
             feature.status = "archived"
             feature.archived_at = datetime.now(UTC)
             data_changed = True
     if data_changed:
         touch_layer_data(session, source.layer_id)
+
+
+def _owned_by_source(feature: Feature, source: ExternalSource) -> bool:
+    provenance = feature.provenance_records
+    return bool(provenance) and all(
+        record.source_type == "external" and record.source_name == source.slug
+        for record in provenance
+    )
 
 
 def _provenance(

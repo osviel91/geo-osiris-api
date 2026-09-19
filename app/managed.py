@@ -76,6 +76,17 @@ def patch_feature(
     previous_status = feature.status
     changed: list[str] = []
 
+    if "status" in fields and payload.status == "archived":
+        raise HTTPException(
+            status_code=409,
+            detail="Use the feature archive lifecycle action",
+        )
+    if "status" in fields and previous_status == "archived":
+        raise HTTPException(
+            status_code=409,
+            detail="Use the feature restore lifecycle action",
+        )
+
     if "geometry" in fields and payload.geometry is not None:
         validate_geometry(payload.geometry, layer.geometry_types)
         feature.geometry = func.ST_SetSRID(

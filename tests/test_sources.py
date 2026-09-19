@@ -4,12 +4,13 @@ from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from geoalchemy2 import WKTElement
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.database import engine
 from app.main import app
-from app.models import ExternalSource, Feature, Layer
+from app.models import ExternalSource, Feature, FeatureProvenance, Layer
 from app.sources import ADAPTERS, NormalizedFeature, register_adapter
 
 pytestmark = pytest.mark.skipif(
@@ -311,6 +312,256 @@ def test_external_sync_updates_archives_and_reactivates_without_duplicates(
         assert client.post(endpoint, headers=headers).status_code == 409
     finally:
         ADAPTERS.pop("reconcile-fixture", None)
+
+
+def test_external_sync_only_updates_archives_and_reactivates_owned_features(
+    monkeypatch,
+) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "owned-update",
+                "geometry": {"type": "Point", "coordinates": [1, 1]},
+                "properties": {"name": "Original"},
+            },
+            {
+                "id": "owned-archive",
+                "geometry": {"type": "Point", "coordinates": [2, 2]},
+                "properties": {"name": "Archive me"},
+            },
+        ]
+    )
+    register_adapter("ownership-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-ownership",
+                name="External ownership",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-ownership",
+                adapter="ownership-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id, layer_id = source.id, layer.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        headers = {"Authorization": "Bearer test-token"}
+        endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+
+        with Session(engine) as session:
+            layer = session.get(Layer, layer_id)
+            assert layer is not None
+            manual = Feature(
+                layer_id=layer_id,
+                external_id="manual-keep",
+                geometry=WKTElement("POINT(3 3)", srid=4326),
+                properties={"owner": "manual"},
+                status="published",
+            )
+            manual.provenance_records.append(
+                FeatureProvenance(source_type="manual", created_by="admin")
+            )
+            imported = Feature(
+                layer_id=layer_id,
+                external_id="import-keep",
+                geometry=WKTElement("POINT(4 4)", srid=4326),
+                properties={"owner": "import"},
+                status="published",
+            )
+            imported.provenance_records.append(
+                FeatureProvenance(source_type="import", created_by="admin")
+            )
+            session.add_all([manual, imported])
+            session.commit()
+
+        adapter.records = [
+            {
+                "id": "owned-update",
+                "geometry": {"type": "Point", "coordinates": [1.1, 1.1]},
+                "properties": {"name": "Updated"},
+            }
+        ]
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+
+        with Session(engine) as session:
+            features = {
+                feature.external_id: feature
+                for feature in session.scalars(select(Feature)).all()
+            }
+            assert features["owned-update"].properties["name"] == "Updated"
+            assert features["owned-archive"].status == "archived"
+            assert features["manual-keep"].status == "published"
+            assert features["import-keep"].status == "published"
+
+        adapter.records.append(
+            {
+                "id": "owned-archive",
+                "geometry": {"type": "Point", "coordinates": [2, 2]},
+                "properties": {"name": "Reactivated"},
+            }
+        )
+        assert client.post(endpoint, headers=headers).json()["status"] == "success"
+
+        with Session(engine) as session:
+            feature = session.scalar(
+                select(Feature).where(Feature.external_id == "owned-archive")
+            )
+            assert feature is not None
+            assert feature.status == "published"
+            assert feature.archived_at is None
+    finally:
+        ADAPTERS.pop("ownership-fixture", None)
+
+
+def test_hard_deleted_external_feature_is_recreated_by_next_sync(monkeypatch) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "recreated",
+                "geometry": {"type": "Point", "coordinates": [5, 5]},
+                "properties": {"name": "Recreated"},
+            }
+        ]
+    )
+    register_adapter("recreate-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="external-recreate",
+                name="External recreate",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="external-recreate",
+                adapter="recreate-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id = source.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        headers = {"Authorization": "Bearer test-token"}
+        sync_endpoint = f"/api/v1/admin/sources/{source_id}/sync"
+        assert client.post(sync_endpoint, headers=headers).json()["status"] == "success"
+
+        with Session(engine) as session:
+            feature = session.scalar(
+                select(Feature).where(
+                    Feature.layer_id == source.layer_id,
+                    Feature.external_id == "recreated",
+                )
+            )
+            assert feature is not None
+            feature_id = feature.id
+
+        deleted = client.post(
+            f"/api/v1/admin/features/{feature_id}/hard-delete",
+            headers=headers,
+            json={"confirm_recreated_on_sync": True},
+        )
+        assert deleted.status_code == 200
+        assert client.post(sync_endpoint, headers=headers).json()["status"] == "success"
+
+        with Session(engine) as session:
+            recreated = session.scalar(
+                select(Feature).where(
+                    Feature.layer_id == source.layer_id,
+                    Feature.external_id == "recreated",
+                )
+            )
+            assert recreated is not None
+            assert recreated.status == "published"
+    finally:
+        ADAPTERS.pop("recreate-fixture", None)
+
+
+@pytest.mark.parametrize(
+    ("source_type", "source_name"),
+    [("manual", None), ("import", None), ("external", "other-source")],
+)
+def test_external_sync_rejects_non_owned_external_id_collisions(
+    monkeypatch, source_type: str, source_name: str | None
+) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "collision",
+                "geometry": {"type": "Point", "coordinates": [9, 9]},
+                "properties": {"name": "Incoming"},
+            }
+        ]
+    )
+    register_adapter("collision-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug=f"collision-{source_type}",
+                name="Collision",
+                category="TEST",
+                mode="external",
+                geometry_types=["Point"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug=f"collision-{source_type}",
+                adapter="collision-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            feature = Feature(
+                layer=layer,
+                external_id="collision",
+                geometry=WKTElement("POINT(8 8)", srid=4326),
+                properties={"name": "Protected"},
+                status="published",
+            )
+            feature.provenance_records.append(
+                FeatureProvenance(
+                    source_type=source_type,
+                    source_name=source_name,
+                    created_by="test",
+                )
+            )
+            session.add_all([source, feature])
+            session.commit()
+            source_id, feature_id = source.id, feature.id
+
+        monkeypatch.setenv("GEO_ADMIN_TOKEN", "test-token")
+        response = client.post(
+            f"/api/v1/admin/sources/{source_id}/sync",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+        assert "not owned by this source" in response.json()["last_error"]
+
+        with Session(engine) as session:
+            feature = session.get(Feature, feature_id)
+            assert feature is not None
+            assert feature.properties == {"name": "Protected"}
+            assert feature.status == "published"
+    finally:
+        ADAPTERS.pop("collision-fixture", None)
 
 
 def test_aemet_station_sync_uses_offline_provider_data_and_preserves_last_good(

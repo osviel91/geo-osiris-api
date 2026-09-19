@@ -258,3 +258,19 @@ class ExternalSource(Base):
             name="external_sources_status_check",
         ),
     )
+
+
+class LifecycleEvent(Base):
+    __tablename__ = "lifecycle_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    entity_type: Mapped[str] = mapped_column(String(20))
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    action: Mapped[str] = mapped_column(String(50))
+    actor: Mapped[str] = mapped_column(String(100))
+    occurred_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    previous_state: Mapped[dict] = mapped_column(JSONB, default=dict)
+    resulting_state: Mapped[dict] = mapped_column(JSONB, default=dict)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)

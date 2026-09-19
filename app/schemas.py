@@ -95,7 +95,6 @@ class LayerUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     description: str | None = None
     category: str | None = Field(default=None, max_length=50)
-    enabled: bool | None = None
     style: dict[str, Any] | None = None
     metadata_: dict[str, Any] | None = None
 
@@ -229,6 +228,7 @@ class ExternalSourceSummary(BaseModel):
     adapter: str
     dataset_id: str
     adapter_config: dict[str, Any]
+    enabled: bool = True
     status: str
     last_attempt_at: datetime | None
     last_success_at: datetime | None
@@ -280,6 +280,26 @@ class AdminFeatureRead(BaseModel):
     verified_at: datetime | None
     archived_at: datetime | None
     provenance: list[ProvenanceRead] = Field(default_factory=list)
+    ownership: str = "manual"
+    source: "FeatureSourceRead | None" = None
+    deletion_warning: str | None = None
+
+
+class FeatureSourceRead(BaseModel):
+    slug: str
+    record_id: str | None
+
+
+class EmptyLayerDelete(BaseModel):
+    confirmation: Literal["DELETE EMPTY LAYER"]
+
+
+class CascadeLayerDelete(BaseModel):
+    confirmation: Literal["DELETE DISPOSABLE LAYER"]
+
+
+class ExternalFeatureDelete(BaseModel):
+    confirm_recreated_on_sync: bool = False
 
 
 class AdminImportRead(BaseModel):

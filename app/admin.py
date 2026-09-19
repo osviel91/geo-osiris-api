@@ -7,8 +7,9 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, tuple_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from app.lifecycle import feature_lifecycle_info
 from app.models import (
     ExternalSource,
     Feature,
@@ -103,6 +104,7 @@ def _feature_read(
     geometry_json: str,
     provenance: list[ProvenanceRead] | None = None,
 ) -> AdminFeatureRead:
+    lifecycle = feature_lifecycle_info(feature)
     return AdminFeatureRead(
         id=str(feature.id),
         layer_id=str(feature.layer_id),
@@ -115,6 +117,7 @@ def _feature_read(
         verified_at=feature.verified_at,
         archived_at=feature.archived_at,
         provenance=provenance or [],
+        **lifecycle,
     )
 
 
@@ -239,9 +242,11 @@ def list_admin_features(
     _require_layer(session, layer_id)
     limit = clamp_limit(limit)
     after = decode_cursor(cursor, {"id"})["id"] if cursor else None
-    statement = select(
-        Feature, func.ST_AsGeoJSON(Feature.geometry).label("geometry_json")
-    ).where(Feature.layer_id == layer_id)
+    statement = (
+        select(Feature, func.ST_AsGeoJSON(Feature.geometry).label("geometry_json"))
+        .where(Feature.layer_id == layer_id)
+        .options(selectinload(Feature.provenance_records))
+    )
     if status is not None:
         statement = statement.where(Feature.status == status)
     else:
