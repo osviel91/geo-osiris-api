@@ -247,6 +247,7 @@ class AgentSourceProposal(BaseModel):
     id_property: str | None = Field(default=None, max_length=100)
     properties: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int = Field(default=20, ge=1, le=60)
+    pagination: dict[str, Any] | None = None
     attribution: str | None = Field(default=None, max_length=500)
     license: str | None = Field(default=None, max_length=200)
 

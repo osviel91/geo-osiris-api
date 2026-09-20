@@ -1,7 +1,7 @@
 from typing import Any
 from urllib.parse import urlsplit
 
-from app.agent_sources import validate_dataset
+from app.agent_sources import canonical_pagination, paginate_json, validate_dataset
 from app.models import ExternalSource
 from app.sources import NormalizedFeature, register_adapter
 
@@ -12,23 +12,33 @@ MAX_TIMEOUT_SECONDS = 60
 class GeoJSONAdapter:
     def fetch(self, source: ExternalSource) -> list[dict[str, Any]]:
         endpoint = _endpoint(source)
-        payload = _request_json(endpoint, _config(source)["timeout_seconds"])
-        if (
-            not isinstance(payload, dict)
-            or payload.get("type") != "FeatureCollection"
-            or not isinstance(payload.get("features"), list)
-            or not all(isinstance(feature, dict) for feature in payload["features"])
-        ):
-            raise ValueError("GeoJSON source must return a FeatureCollection")
-        if source.layer is not None:
-            validate_dataset(
+        config = _config(source)
+        payload, _, _ = paginate_json(
+            endpoint,
+            config["timeout_seconds"],
+            config["pagination"],
+            lambda url, timeout: (_request_json(url, timeout), {}),
+        )
+        geometry_types = (
+            source.layer.geometry_types
+            if source.layer is not None
+            else sorted(
                 {
-                    "id_property": _config(source)["id_property"],
-                    "properties": _config(source)["properties"],
-                    "geometry_types": source.layer.geometry_types,
-                },
-                payload,
+                    feature["geometry"]["type"]
+                    for feature in payload["features"]
+                    if isinstance(feature.get("geometry"), dict)
+                    and isinstance(feature["geometry"].get("type"), str)
+                }
             )
+        )
+        validate_dataset(
+            {
+                "id_property": config["id_property"],
+                "properties": config["properties"],
+                "geometry_types": geometry_types,
+            },
+            payload,
+        )
         return payload["features"]
 
     def normalize(
@@ -102,6 +112,7 @@ def _config(source: ExternalSource) -> dict[str, Any]:
         "id_property": id_property,
         "properties": properties,
         "timeout_seconds": timeout,
+        "pagination": canonical_pagination(config.get("pagination")),
     }
 
 

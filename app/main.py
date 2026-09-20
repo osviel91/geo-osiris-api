@@ -720,6 +720,7 @@ def agent_create_source(
             "id_property": proposal.id_property,
             "properties": proposal.properties,
             "timeout_seconds": proposal.timeout_seconds,
+            "pagination": proposal.pagination,
             "fingerprint": validation.fingerprint,
         },
         enabled=False,

@@ -4,7 +4,7 @@ import json
 import socket
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from app.geometry import validate_geometry, validate_properties
@@ -14,6 +14,9 @@ MAX_FEATURES = 10_000
 MAX_MAPPINGS = 32
 MAX_URL_LENGTH = 2_000
 MAX_NAME_LENGTH = 100
+MAX_PAGE_SIZE = 1_000
+MAX_PAGES = 100
+MAX_PARAMETER_NAME_LENGTH = 50
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -46,6 +49,7 @@ def canonical_proposal(value: Any) -> dict[str, Any]:
         "timeout_seconds",
         "attribution",
         "license",
+        "pagination",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -90,7 +94,60 @@ def canonical_proposal(value: Any) -> dict[str, Any]:
     result["timeout_seconds"] = timeout
     result["properties"] = dict(sorted(mappings.items()))
     result["geometry_types"] = list(dict.fromkeys(types))
+    result["pagination"] = canonical_pagination(result.get("pagination"))
     return result
+
+
+def canonical_pagination(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("pagination must be an object")
+    allowed = {"type", "limit_param", "offset_param", "page_size", "max_pages"}
+    if set(value) - allowed:
+        raise ValueError("pagination contains unsupported fields")
+    if value.get("type") != "offset":
+        raise ValueError("pagination.type must be 'offset'")
+    limit_param = value.get("limit_param")
+    offset_param = value.get("offset_param")
+    for name, parameter in (
+        ("limit_param", limit_param),
+        ("offset_param", offset_param),
+    ):
+        if (
+            not isinstance(parameter, str)
+            or not 1 <= len(parameter) <= MAX_PARAMETER_NAME_LENGTH
+            or not parameter.replace("_", "").isalnum()
+            or not parameter[0].isalpha()
+        ):
+            raise ValueError(f"pagination.{name} is invalid")
+    if limit_param == offset_param:
+        raise ValueError("pagination parameters must be different")
+    page_size = value.get("page_size")
+    max_pages = value.get("max_pages")
+    if (
+        isinstance(page_size, bool)
+        or not isinstance(page_size, int)
+        or not 1 <= page_size <= MAX_PAGE_SIZE
+    ):
+        raise ValueError(
+            f"pagination.page_size must be an integer between 1 and {MAX_PAGE_SIZE}"
+        )
+    if (
+        isinstance(max_pages, bool)
+        or not isinstance(max_pages, int)
+        or not 1 <= max_pages <= MAX_PAGES
+    ):
+        raise ValueError(
+            f"pagination.max_pages must be an integer between 1 and {MAX_PAGES}"
+        )
+    return {
+        "type": "offset",
+        "limit_param": limit_param,
+        "offset_param": offset_param,
+        "page_size": page_size,
+        "max_pages": max_pages,
+    }
 
 
 def _validate_url(url: Any) -> tuple[str, list[str]]:
@@ -156,7 +213,73 @@ def fetch_dataset(endpoint: str, timeout: int) -> tuple[dict[str, Any], dict[str
     return payload, {"hostname": hostname, "addresses": addresses, "bytes": len(data)}
 
 
-def validate_dataset(proposal: dict[str, Any], payload: Any) -> dict[str, Any]:
+def paginate_json(
+    endpoint: str,
+    timeout: int,
+    pagination: dict[str, Any] | None,
+    request: Any,
+) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+    """Collect a bounded offset-paginated FeatureCollection before publishing it."""
+    if pagination is None:
+        payload, identity = request(endpoint, timeout)
+        _require_feature_collection(payload)
+        return payload, [identity], 1
+
+    page_size = pagination["page_size"]
+    features: list[dict[str, Any]] = []
+    identities: list[dict[str, Any]] = []
+    for page_number in range(pagination["max_pages"]):
+        offset = page_number * page_size
+        page_url = _pagination_url(
+            endpoint,
+            pagination["limit_param"],
+            pagination["offset_param"],
+            page_size,
+            offset,
+        )
+        payload, identity = request(page_url, timeout)
+        _require_feature_collection(payload)
+        page_features = payload["features"]
+        features.extend(page_features)
+        identities.append({"url": page_url, **identity})
+        if len(features) > MAX_FEATURES:
+            raise ValueError("GeoJSON source contains more than 10000 features")
+        if len(page_features) < page_size:
+            return (
+                {"type": "FeatureCollection", "features": features},
+                identities,
+                page_number + 1,
+            )
+    raise ValueError("GeoJSON pagination limit reached while pages remain full")
+
+
+def _require_feature_collection(payload: Any) -> None:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("type") != "FeatureCollection"
+        or not isinstance(payload.get("features"), list)
+        or not all(isinstance(feature, dict) for feature in payload["features"])
+    ):
+        raise ValueError("GeoJSON source must return a FeatureCollection")
+
+
+def _pagination_url(
+    endpoint: str, limit_param: str, offset_param: str, page_size: int, offset: int
+) -> str:
+    parts = urlsplit(endpoint)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    query = [
+        (key, value)
+        for key, value in query
+        if key not in {limit_param, offset_param}
+    ]
+    query.extend(((limit_param, str(page_size)), (offset_param, str(offset))))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+
+def validate_dataset(
+    proposal: dict[str, Any], payload: Any, seen_ids: set[str] | None = None
+) -> dict[str, Any]:
     if (
         not isinstance(payload, dict)
         or payload.get("type") != "FeatureCollection"
@@ -166,7 +289,7 @@ def validate_dataset(proposal: dict[str, Any], payload: Any) -> dict[str, Any]:
     features = payload["features"]
     if len(features) > MAX_FEATURES:
         raise ValueError("GeoJSON source contains more than 10000 features")
-    ids: set[str] = set()
+    ids = seen_ids if seen_ids is not None else set()
     geometry_types: set[str] = set()
     mappings = proposal["properties"]
     for feature in features:
@@ -212,12 +335,16 @@ def validate_dataset(proposal: dict[str, Any], payload: Any) -> dict[str, Any]:
 
 def preflight(proposal: dict[str, Any]) -> PreflightResult:
     normalized = canonical_proposal(proposal)
-    payload, identity = fetch_dataset(
-        normalized["endpoint"], normalized["timeout_seconds"]
+    payload, identities, pages = paginate_json(
+        normalized["endpoint"],
+        normalized["timeout_seconds"],
+        normalized["pagination"],
+        fetch_dataset,
     )
-    summary = validate_dataset(normalized, payload)
+    seen_ids: set[str] = set()
+    summary = validate_dataset(normalized, payload, seen_ids)
     canonical = json.dumps(
-        {"proposal": normalized, "identity": identity, "dataset": payload},
+        {"proposal": normalized, "identity": identities, "dataset": payload},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -226,6 +353,6 @@ def preflight(proposal: dict[str, Any]) -> PreflightResult:
         normalized,
         payload,
         fingerprint,
-        summary | identity,
+        summary | {"pages_fetched": pages, "identities": identities},
         ["DNS addresses are prechecked but not pinned during TLS connection."],
     )
