@@ -7,7 +7,11 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from app.geometry import validate_geometry, validate_properties
+from app.geometry import (
+    canonical_geometry_repair,
+    validate_geometry,
+    validate_properties,
+)
 
 MAX_BYTES = 64 * 1024 * 1024
 MAX_FEATURES = 10_000
@@ -50,6 +54,7 @@ def canonical_proposal(value: Any) -> dict[str, Any]:
         "attribution",
         "license",
         "pagination",
+        "geometry_repair",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -95,6 +100,7 @@ def canonical_proposal(value: Any) -> dict[str, Any]:
     result["properties"] = dict(sorted(mappings.items()))
     result["geometry_types"] = list(dict.fromkeys(types))
     result["pagination"] = canonical_pagination(result.get("pagination"))
+    result["geometry_repair"] = canonical_geometry_repair(result.get("geometry_repair"))
     return result
 
 

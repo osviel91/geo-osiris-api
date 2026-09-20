@@ -9,7 +9,11 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.freshness import touch_layer_data
-from app.geometry import validate_geometry, validate_properties
+from app.geometry import (
+    canonical_geometry_repair,
+    validate_geometry,
+    validate_properties,
+)
 from app.models import ExternalSource, Feature, FeatureProvenance
 
 
@@ -22,6 +26,12 @@ class NormalizedFeature:
     source_url: str | None = None
     observed_at: datetime | None = None
     metadata: dict[str, Any] | None = None
+
+
+class GeometryRepairError(ValueError):
+    def __init__(self, message: str, counts: dict[str, int]) -> None:
+        super().__init__(message)
+        self.counts = counts
 
 
 class SourceAdapter(Protocol):
@@ -76,12 +86,16 @@ def sync_source_report(
         source.status = "failed"
         source.last_error = str(error)[:2_000]
         session.commit()
+        validation_counts = getattr(error, "counts", {})
         return source, {
             "created": 0,
             "updated": 0,
             "archived": 0,
             "unchanged": 0,
             "reactivated": 0,
+            "valid_as_received": validation_counts.get("valid_as_received", 0),
+            "repaired": validation_counts.get("repaired", 0),
+            "rejected": validation_counts.get("rejected", 0),
         }
 
     source.status = "success"
@@ -94,12 +108,10 @@ def sync_source_report(
 def _reconcile(
     session: Session, source: ExternalSource, records: list[NormalizedFeature]
 ) -> dict[str, int]:
-    incoming = {record.external_id: record for record in records}
-    if len(incoming) != len(records):
+    if len({record.external_id for record in records}) != len(records):
         raise ValueError("Upstream source contains duplicate record IDs")
-    for record in records:
-        validate_geometry(record.geometry, source.layer.geometry_types)
-        validate_properties(record.properties)
+    records, validation_counts = _prepare_records(session, source, records)
+    incoming = {record.external_id: record for record in records}
     existing = {
         feature.external_id: feature
         for feature in session.scalars(
@@ -126,6 +138,7 @@ def _reconcile(
         "archived": 0,
         "unchanged": 0,
         "reactivated": 0,
+        **validation_counts,
     }
     data_changed = False
     for external_id, record in incoming.items():
@@ -172,6 +185,80 @@ def _reconcile(
     if data_changed:
         touch_layer_data(session, source.layer_id)
     return counts
+
+
+def _prepare_records(
+    session: Session, source: ExternalSource, records: list[NormalizedFeature]
+) -> tuple[list[NormalizedFeature], dict[str, int]]:
+    repair = canonical_geometry_repair(
+        (source.adapter_config or {}).get("geometry_repair")
+    )
+    prepared: list[NormalizedFeature] = []
+    counts = {"valid_as_received": 0, "repaired": 0, "rejected": 0}
+    for record in records:
+        validate_geometry(record.geometry, source.layer.geometry_types)
+        validate_properties(record.properties)
+        if repair is None:
+            counts["valid_as_received"] += 1
+            prepared.append(record)
+            continue
+        valid, reason, geometry_type, repaired_valid, geometry = session.execute(
+            text(
+                """
+                WITH input AS (
+                    SELECT ST_SetSRID(
+                        ST_GeomFromGeoJSON(:geometry), 4326
+                    ) AS geom
+                ), checked AS (
+                    SELECT geom, ST_IsValid(geom) AS valid,
+                        ST_IsValidReason(geom) AS reason
+                    FROM input
+                ), candidate AS (
+                    SELECT *, CASE WHEN valid THEN geom ELSE ST_MakeValid(geom) END
+                        AS repaired
+                    FROM checked
+                )
+                SELECT valid, reason, ST_GeometryType(repaired),
+                    ST_IsValid(repaired), ST_AsGeoJSON(repaired)
+                FROM candidate
+                """
+            ),
+            {"geometry": json.dumps(record.geometry)},
+        ).one()
+        if valid:
+            counts["valid_as_received"] += 1
+            prepared.append(record)
+            continue
+        allowed = {f"ST_{name}" for name in source.layer.geometry_types}
+        if (
+            repair["method"] != "make_valid"
+            or not repaired_valid
+            or geometry_type not in allowed
+        ):
+            counts["rejected"] += 1
+            raise GeometryRepairError(
+                f"Geometry is invalid and could not be repaired: {reason}",
+                counts.copy(),
+            )
+        counts["repaired"] += 1
+        metadata = dict(record.metadata or {})
+        metadata["geometry_repair"] = {
+            "method": repair["method"],
+            "original_valid": False,
+            "original_reason": reason,
+        }
+        prepared.append(
+            NormalizedFeature(
+                external_id=record.external_id,
+                geometry=json.loads(geometry),
+                properties=record.properties,
+                source_record_id=record.source_record_id,
+                source_url=record.source_url,
+                observed_at=record.observed_at,
+                metadata=metadata,
+            )
+        )
+    return prepared, counts
 
 
 def _owned_by_source(feature: Feature, source: ExternalSource) -> bool:

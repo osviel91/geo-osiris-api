@@ -2,6 +2,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.agent_sources import canonical_pagination, paginate_json, validate_dataset
+from app.geometry import canonical_geometry_repair
 from app.models import ExternalSource
 from app.sources import NormalizedFeature, register_adapter
 
@@ -113,6 +114,7 @@ def _config(source: ExternalSource) -> dict[str, Any]:
         "properties": properties,
         "timeout_seconds": timeout,
         "pagination": canonical_pagination(config.get("pagination")),
+        "geometry_repair": canonical_geometry_repair(config.get("geometry_repair")),
     }
 
 

@@ -6,6 +6,16 @@ from fastapi import HTTPException
 MAX_PROPERTIES_BYTES = 64_000
 
 
+def canonical_geometry_repair(value: Any) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"method"}:
+        raise ValueError("geometry_repair must contain only method")
+    if value.get("method") != "make_valid":
+        raise ValueError("geometry_repair.method must be 'make_valid'")
+    return {"method": "make_valid"}
+
+
 def validate_geometry(geometry: dict[str, Any], allowed_types: list[str]) -> None:
     geometry_type = geometry.get("type")
     if geometry_type not in allowed_types:

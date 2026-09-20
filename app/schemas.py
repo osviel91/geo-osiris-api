@@ -248,6 +248,7 @@ class AgentSourceProposal(BaseModel):
     properties: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int = Field(default=20, ge=1, le=60)
     pagination: dict[str, Any] | None = None
+    geometry_repair: dict[str, Any] | None = None
     attribution: str | None = Field(default=None, max_length=500)
     license: str | None = Field(default=None, max_length=200)
 
@@ -275,6 +276,9 @@ class AgentSourceSync(BaseModel):
     archived: int
     unchanged: int
     reactivated: int
+    valid_as_received: int = 0
+    repaired: int = 0
+    rejected: int = 0
     duration_ms: int
     attempted_at: datetime
     completed_at: datetime

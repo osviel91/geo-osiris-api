@@ -5,13 +5,18 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 from geoalchemy2 import WKTElement
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.database import engine
 from app.main import app
 from app.models import ExternalSource, Feature, FeatureProvenance, Layer
-from app.sources import ADAPTERS, NormalizedFeature, register_adapter
+from app.sources import (
+    ADAPTERS,
+    NormalizedFeature,
+    register_adapter,
+    sync_source_report,
+)
 
 pytestmark = pytest.mark.skipif(
     "TEST_DATABASE_URL" not in os.environ,
@@ -140,6 +145,108 @@ def test_external_source_sync_is_idempotent_and_preserves_last_good_data(
         )
     finally:
         ADAPTERS.pop("fixture", None)
+
+
+def test_geometry_repair_is_validated_and_recorded(monkeypatch) -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "area-1",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [[[[-1, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]]],
+                },
+                "properties": {"name": "Repaired"},
+            }
+        ]
+    )
+    register_adapter("repair-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="repair-fixture",
+                name="Repair fixture",
+                category="TEST",
+                mode="external",
+                geometry_types=["MultiPolygon"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="repair-fixture",
+                adapter="repair-fixture",
+                dataset_id="fixture-v1",
+                adapter_config={"geometry_repair": {"method": "make_valid"}},
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id = source.id
+
+        with Session(engine) as session:
+            source, counts = sync_source_report(session, source_id)
+            assert source.status == "success"
+            assert counts["valid_as_received"] == 0
+            assert counts["repaired"] == 1
+            assert counts["rejected"] == 0
+            feature = session.scalar(select(Feature))
+            assert feature is not None
+            assert session.scalar(select(func.ST_IsValid(feature.geometry))) is True
+            assert (
+                feature.provenance_records[0].metadata_["geometry_repair"]["method"]
+                == "make_valid"
+            )
+    finally:
+        ADAPTERS.pop("repair-fixture", None)
+
+
+def test_geometry_repair_rejects_incompatible_output_atomically() -> None:
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "area-1",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[-1, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]],
+                },
+                "properties": {"name": "Invalid"},
+            }
+        ]
+    )
+    register_adapter("reject-repair-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="reject-repair-fixture",
+                name="Reject repair fixture",
+                category="TEST",
+                mode="external",
+                geometry_types=["Polygon"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="reject-repair-fixture",
+                adapter="reject-repair-fixture",
+                dataset_id="fixture-v1",
+                adapter_config={"geometry_repair": {"method": "make_valid"}},
+                status="never",
+            )
+            session.add(source)
+            session.commit()
+            source_id = source.id
+
+        with Session(engine) as session:
+            source, counts = sync_source_report(session, source_id)
+            assert source.status == "failed"
+            assert counts["created"] == 0
+            assert counts["repaired"] == 0
+            assert counts["rejected"] == 1
+            assert session.scalar(select(func.count()).select_from(Feature)) == 0
+    finally:
+        ADAPTERS.pop("reject-repair-fixture", None)
 
 
 def test_external_sync_updates_layer_revision(monkeypatch) -> None:
