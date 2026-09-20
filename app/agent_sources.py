@@ -269,9 +269,7 @@ def _pagination_url(
     parts = urlsplit(endpoint)
     query = parse_qsl(parts.query, keep_blank_values=True)
     query = [
-        (key, value)
-        for key, value in query
-        if key not in {limit_param, offset_param}
+        (key, value) for key, value in query if key not in {limit_param, offset_param}
     ]
     query.extend(((limit_param, str(page_size)), (offset_param, str(offset))))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))

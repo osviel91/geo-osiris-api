@@ -253,9 +253,7 @@ def test_geojson_adapter_propagates_later_page_size_failure(monkeypatch) -> None
 
     monkeypatch.setattr("app.geojson_source._request_json", request)
     with pytest.raises(ValueError, match="64 MiB"):
-        GeoJSONAdapter().fetch(
-            source({"properties": {}, "pagination": pagination()})
-        )
+        GeoJSONAdapter().fetch(source({"properties": {}, "pagination": pagination()}))
 
 
 @pytest.mark.parametrize(
