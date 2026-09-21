@@ -158,7 +158,8 @@ def _reconcile(
             continue
         feature = previous
         changed = (
-            not session.scalar(
+            session.scalar(select(func.ST_IsValid(feature.geometry))) is not True
+            or not session.scalar(
                 select(func.ST_Equals(feature.geometry, _geometry(record.geometry)))
             )
             or feature.properties != record.properties

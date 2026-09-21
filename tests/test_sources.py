@@ -201,6 +201,141 @@ def test_geometry_repair_is_validated_and_recorded(monkeypatch) -> None:
         ADAPTERS.pop("repair-fixture", None)
 
 
+def test_geometry_repair_replaces_existing_invalid_geometry(monkeypatch) -> None:
+    invalid_geometry = {
+        "type": "MultiPolygon",
+        "coordinates": [[[[-1, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]]],
+    }
+    adapter = FixtureAdapter(
+        [
+            {
+                "id": "area-1",
+                "geometry": invalid_geometry,
+                "properties": {"name": "Repaired"},
+            }
+        ]
+    )
+    register_adapter("existing-repair-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="existing-repair-fixture",
+                name="Existing repair fixture",
+                category="TEST",
+                mode="external",
+                geometry_types=["MultiPolygon"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="existing-repair-fixture",
+                adapter="existing-repair-fixture",
+                dataset_id="fixture-v1",
+                adapter_config={"geometry_repair": {"method": "make_valid"}},
+                status="never",
+            )
+            feature = Feature(
+                layer=layer,
+                external_id="area-1",
+                geometry=WKTElement(
+                    "MULTIPOLYGON(((-1 -1, 1 1, -1 1, 1 -1, -1 -1)))", srid=4326
+                ),
+                properties={"name": "Repaired"},
+                status="published",
+            )
+            feature.provenance_records.append(
+                FeatureProvenance(
+                    source_type="external",
+                    source_name="existing-repair-fixture",
+                    created_by="test",
+                )
+            )
+            session.add_all([source, feature])
+            session.commit()
+            source_id = source.id
+
+        with Session(engine) as session:
+            source, counts = sync_source_report(session, source_id)
+            assert source.status == "success"
+            assert counts["repaired"] == 1
+            assert counts["updated"] == 1
+            assert counts["unchanged"] == 0
+            feature = session.scalar(select(Feature))
+            assert feature is not None
+            assert session.scalar(select(func.ST_IsValid(feature.geometry))) is True
+            assert {item.source_name for item in feature.provenance_records} == {
+                "existing-repair-fixture"
+            }
+            assert (
+                feature.provenance_records[-1].metadata_["geometry_repair"]["method"]
+                == "make_valid"
+            )
+    finally:
+        ADAPTERS.pop("existing-repair-fixture", None)
+
+
+def test_geometry_repair_reconsiders_existing_invalid_when_config_is_added() -> None:
+    invalid_geometry = {
+        "type": "MultiPolygon",
+        "coordinates": [[[[-1, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]]],
+    }
+    adapter = FixtureAdapter(
+        [{"id": "area-1", "geometry": invalid_geometry, "properties": {}}]
+    )
+    register_adapter("config-transition-fixture", adapter)
+    try:
+        with Session(engine) as session:
+            layer = Layer(
+                slug="config-transition-fixture",
+                name="Config transition fixture",
+                category="TEST",
+                mode="external",
+                geometry_types=["MultiPolygon"],
+                style={},
+                metadata_={},
+            )
+            source = ExternalSource(
+                layer=layer,
+                slug="config-transition-fixture",
+                adapter="config-transition-fixture",
+                dataset_id="fixture-v1",
+                status="never",
+            )
+            feature = Feature(
+                layer=layer,
+                external_id="area-1",
+                geometry=WKTElement(
+                    "MULTIPOLYGON(((-1 -1, 1 1, -1 1, 1 -1, -1 -1)))", srid=4326
+                ),
+                properties={},
+                status="published",
+            )
+            feature.provenance_records.append(
+                FeatureProvenance(
+                    source_type="external",
+                    source_name="config-transition-fixture",
+                    created_by="test",
+                )
+            )
+            session.add_all([source, feature])
+            session.commit()
+            source.adapter_config = {"geometry_repair": {"method": "make_valid"}}
+            session.commit()
+            source_id = source.id
+
+        with Session(engine) as session:
+            source, counts = sync_source_report(session, source_id)
+            assert source.status == "success"
+            assert counts["repaired"] == 1
+            assert counts["updated"] == 1
+            repaired = session.scalar(select(Feature))
+            assert repaired is not None
+            assert session.scalar(select(func.ST_IsValid(repaired.geometry))) is True
+    finally:
+        ADAPTERS.pop("config-transition-fixture", None)
+
+
 def test_geometry_repair_rejects_incompatible_output_atomically() -> None:
     adapter = FixtureAdapter(
         [
